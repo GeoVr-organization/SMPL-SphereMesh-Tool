@@ -1,0 +1,22 @@
+# Core numerics / ML
+numpy
+torch
+scipy
+
+# 3D visualization
+pyvista
+pyvistaqt
+vtk
+polyscope
+
+# GUI
+PyQt6
+
+# Plotting / colormaps
+matplotlib
+
+# SMPL body model
+smpl_pytorch @ git+https://github.com/GeoVr-organization/smpl-pytorch.git@dev
+
+# Note: `bpy` (Blender Python) is NOT listed. FBX export runs inside an external
+# Blender executable via subprocess (src/export_smpl_fbx.py), not in this venv.
