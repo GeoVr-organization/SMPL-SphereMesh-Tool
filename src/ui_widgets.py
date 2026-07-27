@@ -224,6 +224,88 @@ class RemoveConnectionDialog(QDialog):
         return self._filtered_map[row]
 
 
+class ImportObjDialog(QDialog):
+    """Pick an OBJ file and how it should be placed in the scene."""
+
+    _COLORS = (
+        ("Tan", "tan"),
+        ("Light gray", "lightgray"),
+        ("Sky blue", "skyblue"),
+        ("Salmon", "salmon"),
+        ("Pale green", "palegreen"),
+        ("White", "white"),
+    )
+
+    def __init__(self, parent, start_dir=""):
+        super().__init__(parent)
+        self.setWindowTitle("Import OBJ")
+        self._start_dir = start_dir
+        layout = QFormLayout(self)
+
+        path_row = QHBoxLayout()
+        self._path_edit = QLineEdit()
+        self._path_edit.setPlaceholderText("Select an .obj file…")
+        path_row.addWidget(self._path_edit)
+        self._browse_btn = QPushButton("Browse…")
+        self._browse_btn.clicked.connect(self._browse)
+        path_row.addWidget(self._browse_btn)
+        layout.addRow("File:", path_row)
+
+        self._scale_spin = QDoubleSpinBox()
+        self._scale_spin.setDecimals(4)
+        self._scale_spin.setRange(0.0001, 10000.0)
+        self._scale_spin.setSingleStep(0.1)
+        self._scale_spin.setValue(1.0)
+        self._scale_spin.setToolTip(
+            "Uniform scale applied on import. The SMPL body is roughly 1.8 units tall, "
+            "so a mesh authored in centimetres needs 0.01."
+        )
+        layout.addRow("Scale:", self._scale_spin)
+
+        self._color_combo = QComboBox()
+        for label, value in self._COLORS:
+            self._color_combo.addItem(label, value)
+        layout.addRow("Color:", self._color_combo)
+
+        self._center_check = QCheckBox("Center on origin")
+        self._center_check.setToolTip(
+            "Translate the mesh so its bounding-box center sits at (0, 0, 0)."
+        )
+        layout.addRow(self._center_check)
+
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._buttons.accepted.connect(self.accept)
+        self._buttons.rejected.connect(self.reject)
+        layout.addRow(self._buttons)
+
+        self._path_edit.textChanged.connect(self._sync_ok_enabled)
+        self._sync_ok_enabled()
+
+    def _browse(self):
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select OBJ file",
+            self._path_edit.text().strip() or self._start_dir,
+            "OBJ (*.obj);;All files (*)",
+        )
+        if filepath:
+            self._path_edit.setText(filepath)
+
+    def _sync_ok_enabled(self):
+        ok_button = self._buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setEnabled(bool(self._path_edit.text().strip()))
+
+    def get_options(self):
+        return {
+            "path": self._path_edit.text().strip(),
+            "scale": float(self._scale_spin.value()),
+            "color": self._color_combo.currentData(),
+            "center": self._center_check.isChecked(),
+        }
+
+
 class BetaSliderGroup(QGroupBox):
     """Group box containing 10 beta sliders with randomize and reset buttons"""
     
@@ -1510,6 +1592,44 @@ class MainWindow(QMainWindow):
         self.export_obj_button.clicked.connect(self.export_smpl_obj)
         self.ui_layout.addWidget(self.export_obj_button)
 
+        # Import external OBJ meshes as reference geometry next to the SMPL body.
+        self._imported_mesh_actors = []
+
+        self.import_obj_button = QPushButton("Import OBJ…")
+        self.import_obj_button.setToolTip(
+            "Load an external .obj mesh into the scene as reference geometry. "
+            "Scale and color are chosen on import; opacity follows the Model Opacity slider."
+        )
+        self.import_obj_button.clicked.connect(self.import_obj_clicked)
+        self.ui_layout.addWidget(self.import_obj_button)
+
+        self.checkbox_show_imported = QCheckBox("Show imported meshes")
+        self.checkbox_show_imported.setChecked(True)
+        self.checkbox_show_imported.stateChanged.connect(self.toggle_imported_meshes)
+        self.ui_layout.addWidget(self.checkbox_show_imported)
+
+        self.clear_imported_button = QPushButton("Clear Imported Meshes")
+        self.clear_imported_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ff6b6b;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #ff5252;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #888888;
+            }
+        """)
+        self.clear_imported_button.clicked.connect(self.clear_imported_meshes_clicked)
+        self.clear_imported_button.setEnabled(False)
+        self.ui_layout.addWidget(self.clear_imported_button)
+
         # Load beta offset CSVs (beta*.csv) from fixed offsets directory.
         self.load_beta_offsets_button = QPushButton("Load Beta Offsets")
         self.load_beta_offsets_button.setToolTip(
@@ -2001,12 +2121,14 @@ class MainWindow(QMainWindow):
             self.plotter.render()
     
     def _on_model_opacity_changed(self, value):
-        """Handle model opacity slider changes"""
+        """Handle model opacity slider changes (drives the SMPL mesh and every imported OBJ)"""
         opacity = value / 100.0
         self.model_opacity_label.setText(f"Model Opacity: {opacity:.2f}")
         if hasattr(self, 'mesh_actor') and self.mesh_actor is not None:
             self.mesh_actor.GetProperty().SetOpacity(opacity)
-            self.plotter.render()
+        for actor in getattr(self, '_imported_mesh_actors', []):
+            actor.GetProperty().SetOpacity(opacity)
+        self.plotter.render()
 
     def update_smplmodel(self, update_radius=True,update_pose=True):
         verts, joints, Rs, T = my_function_forward(self.smpl_model, self.beta, self.theta)
@@ -2249,6 +2371,81 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Export OBJ", f"Failed to write file:\n{e}"
             )
+
+    def import_obj_clicked(self):
+        """Pick an OBJ file in a modal dialog and render it in the scene."""
+        default_dir = str(Path(__file__).resolve().parent.parent / "data")
+        dlg = ImportObjDialog(self, default_dir)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        options = dlg.get_options()
+        if not options["path"]:
+            return
+        self._load_obj_into_scene(options)
+
+    def _load_obj_into_scene(self, options):
+        """Read an OBJ from disk and add it to the plotter, keeping the actor for toggling/removal."""
+        path = options["path"]
+        try:
+            mesh = pv.read(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Import OBJ", f"Failed to read OBJ file:\n{e}")
+            return
+
+        # An OBJ holding several named objects comes back as a MultiBlock.
+        if isinstance(mesh, pv.MultiBlock):
+            mesh = mesh.combine()
+        if mesh is None or mesh.n_points == 0:
+            QMessageBox.warning(self, "Import OBJ", f"No geometry found in:\n{path}")
+            return
+
+        # Center before scaling: scale() is about the origin, so the order keeps a centered mesh centered.
+        if options["center"]:
+            mesh.translate(-np.asarray(mesh.center, dtype=float), inplace=True)
+        if options["scale"] != 1.0:
+            mesh.scale(options["scale"], inplace=True)
+
+        # Opacity is owned by the Model Opacity slider, so a new import matches what is on screen.
+        actor = self.plotter.add_mesh(
+            mesh,
+            color=options["color"],
+            opacity=self.model_opacity_slider.value() / 100.0,
+            name=f"imported_obj_{len(self._imported_mesh_actors)}_{Path(path).stem}",
+            reset_camera=False,
+        )
+        actor.SetVisibility(self.checkbox_show_imported.isChecked())
+        self._imported_mesh_actors.append(actor)
+        self.clear_imported_button.setEnabled(True)
+
+        # A newly added actor must honour clip planes that are already active.
+        if self._clip_planes_vtk:
+            self._apply_clip_planes_to_all_actors()
+        self.plotter.render()
+
+    def toggle_imported_meshes(self, state):
+        """Toggle visibility of every OBJ brought in through the import dialog."""
+        visible = state == Qt.CheckState.Checked.value
+        for actor in self._imported_mesh_actors:
+            actor.SetVisibility(visible)
+        self.plotter.render()
+
+    def clear_imported_meshes_clicked(self):
+        """Remove every imported OBJ from the scene."""
+        count = len(self._imported_mesh_actors)
+        if count == 0:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear Imported Meshes",
+            f"Remove {count} imported mesh{'es' if count != 1 else ''} from the scene?",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        for actor in self._imported_mesh_actors:
+            self.plotter.remove_actor(actor, reset_camera=False)
+        self._imported_mesh_actors.clear()
+        self.clear_imported_button.setEnabled(False)
+        self.plotter.render()
 
     def add_sphere_clicked(self):
         if self.sphere_manager:
