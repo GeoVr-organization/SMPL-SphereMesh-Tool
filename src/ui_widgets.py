@@ -727,6 +727,17 @@ class InfoPanel(QGroupBox):
         self.sphere1_to_joint_btn.clicked.connect(lambda: self._on_move_to_joint_clicked(0))
         center2_row.addWidget(self.sphere1_to_joint_btn)
 
+        self.sphere1_to_bone_btn = QPushButton("To bone")
+        self.sphere1_to_bone_btn.setFixedSize(70, 28)
+        self.sphere1_to_bone_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #2980b9; }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
+        """)
+        self.sphere1_to_bone_btn.setToolTip("Move this sphere to the closest point on a SMPL bone (segment between two joints)")
+        self.sphere1_to_bone_btn.clicked.connect(lambda: self._on_move_to_bone_clicked(0))
+        center2_row.addWidget(self.sphere1_to_bone_btn)
+
         sphere1_layout.addLayout(center2_row)
 
         self.sphere1_lock_btn = QPushButton("Lock")
@@ -840,6 +851,17 @@ class InfoPanel(QGroupBox):
         self.sphere2_to_joint_btn.clicked.connect(lambda: self._on_move_to_joint_clicked(1))
         center2_row.addWidget(self.sphere2_to_joint_btn)
 
+        self.sphere2_to_bone_btn = QPushButton("To bone")
+        self.sphere2_to_bone_btn.setFixedSize(70, 28)
+        self.sphere2_to_bone_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #2980b9; }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
+        """)
+        self.sphere2_to_bone_btn.setToolTip("Move this sphere to the closest point on a SMPL bone (segment between two joints)")
+        self.sphere2_to_bone_btn.clicked.connect(lambda: self._on_move_to_bone_clicked(1))
+        center2_row.addWidget(self.sphere2_to_bone_btn)
+
         sphere2_layout.addLayout(center2_row)
 
         self.sphere2_lock_btn = QPushButton("Lock")
@@ -948,6 +970,17 @@ class InfoPanel(QGroupBox):
         self.sphere3_to_joint_btn.setToolTip("Move this sphere to the closest SMPL joint")
         self.sphere3_to_joint_btn.clicked.connect(lambda: self._on_move_to_joint_clicked(2))
         center3_row.addWidget(self.sphere3_to_joint_btn)
+
+        self.sphere3_to_bone_btn = QPushButton("To bone")
+        self.sphere3_to_bone_btn.setFixedSize(70, 28)
+        self.sphere3_to_bone_btn.setStyleSheet("""
+            QPushButton { background-color: #3498db; color: white; border: none; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #2980b9; }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
+        """)
+        self.sphere3_to_bone_btn.setToolTip("Move this sphere to the closest point on a SMPL bone (segment between two joints)")
+        self.sphere3_to_bone_btn.clicked.connect(lambda: self._on_move_to_bone_clicked(2))
+        center3_row.addWidget(self.sphere3_to_bone_btn)
 
         sphere3_layout.addLayout(center3_row)
 
@@ -1138,6 +1171,11 @@ class InfoPanel(QGroupBox):
         """Handle 'To joint' button: move this sphere to the closest SMPL joint (callback set by MainWindow)."""
         if getattr(self, 'move_to_joint_callback', None) is not None:
             self.move_to_joint_callback(sphere_index)
+
+    def _on_move_to_bone_clicked(self, sphere_index):
+        """Handle 'To bone' button: move this sphere to the closest point on a SMPL bone (callback set by MainWindow)."""
+        if getattr(self, 'move_to_bone_callback', None) is not None:
+            self.move_to_bone_callback(sphere_index)
 
     def update_lock_buttons(self, locked_per_sphere, num_spheres):
         """Update per-sphere lock button text and style. locked_per_sphere: list of 3 bools; num_spheres: 0, 1, 2, or 3."""
@@ -1594,6 +1632,7 @@ class MainWindow(QMainWindow):
         # InfoPanel Grow button: use MainWindow handler so we can pass the SMPL mesh
         self.info_panel.grow_click_callback = self._handle_grow_clicked
         self.info_panel.move_to_joint_callback = self._move_sphere_to_closest_joint
+        self.info_panel.move_to_bone_callback = self._move_sphere_to_closest_bone
         self.info_panel.toggle_clip_planes_panel_callback = self._toggle_clip_planes_panel_visibility
 
         # Register heatmap callback so sphere_manager can trigger mesh/legend update
@@ -1608,7 +1647,7 @@ class MainWindow(QMainWindow):
             self._position_clip_planes_panel(center_right_container)
         center_right_container.resizeEvent = on_resize
 
-        load_path = Path(__file__).resolve().parent.parent / "data" / "template.json"
+        load_path = Path(__file__).resolve().parent.parent / "data" / "template_male_1.0.json"
         try:
             self.sphere_manager.load_from_json(str(load_path))
             self.sphere_manager.initialize_radius_scaling_from_mesh(mesh)
@@ -2350,6 +2389,51 @@ class MainWindow(QMainWindow):
         self.info_panel.update_selected_info()
         self.plotter.render()
 
+    def _move_sphere_to_closest_bone(self, sphere_index):
+        """Move the given sphere in the selected group to the closest point on a SMPL bone.
+
+        A bone is the segment between a joint and its parent joint. The sphere center is
+        snapped to the nearest point along any such segment (clamped to the endpoints), so
+        it lands on the skeleton's tube/line rather than only on a joint.
+        """
+        if not self.sphere_manager or not hasattr(self, "smpl_model") or self.smpl_model is None:
+            return
+        data = self.sphere_manager.get_selected_sphere_display_data()
+        if not data or sphere_index >= data["num_slots"]:
+            return
+        _, joints, _, _ = my_function_forward(self.smpl_model, self.beta, self.theta)
+        joints_np = joints.detach().cpu().numpy()
+        kintree = np.asarray(self.smpl_model.parents, dtype=np.int64).reshape(-1)
+        gidx = data["endpoint_indices"][sphere_index]
+        center = np.array(data["centers"][sphere_index], dtype=np.float64)
+
+        closest_point = None
+        closest_distance = None
+        for child_index in range(1, len(kintree)):
+            parent_index = int(kintree[child_index])
+            if parent_index < 0 or parent_index >= len(joints_np) or child_index >= len(joints_np):
+                continue
+            parent_pos = joints_np[parent_index].astype(np.float64)
+            child_pos = joints_np[child_index].astype(np.float64)
+            bone_vector = child_pos - parent_pos
+            bone_length_sq = float(np.dot(bone_vector, bone_vector))
+            if bone_length_sq == 0.0:
+                point_on_bone = parent_pos
+            else:
+                projection_fraction = float(np.dot(center - parent_pos, bone_vector) / bone_length_sq)
+                projection_fraction = min(1.0, max(0.0, projection_fraction))
+                point_on_bone = parent_pos + projection_fraction * bone_vector
+            distance = float(np.linalg.norm(point_on_bone - center))
+            if closest_distance is None or distance < closest_distance:
+                closest_distance = distance
+                closest_point = point_on_bone
+
+        if closest_point is None:
+            return
+        self.sphere_manager.set_sphere_center_global(gidx, closest_point.tolist())
+        self.info_panel.update_selected_info()
+        self.plotter.render()
+
     def toggle_smpl_model(self, state):
         """Toggle SMPL model visibility"""
         if hasattr(self, 'mesh_actor') and self.mesh_actor is not None:
@@ -2430,7 +2514,7 @@ class MainWindow(QMainWindow):
         self.plotter.render()
 
     def toggle_uniform_radius_preview(self, state):
-        """Temporarily force all sphere radii to 0.02; restore on uncheck."""
+        """Temporarily force all sphere radii to 0.01; restore on uncheck."""
         if not self.sphere_manager:
             return
         active = state == Qt.CheckState.Checked.value
@@ -2438,7 +2522,7 @@ class MainWindow(QMainWindow):
             self.checkbox_inflate.blockSignals(True)
             self.checkbox_inflate.setChecked(False)
             self.checkbox_inflate.blockSignals(False)
-        self.sphere_manager.set_uniform_radius_override(active, 0.02, mode="absolute")
+        self.sphere_manager.set_uniform_radius_override(active, 0.01, mode="absolute")
         self.plotter.render()
 
     def _on_show_heatmap(self, visible):
