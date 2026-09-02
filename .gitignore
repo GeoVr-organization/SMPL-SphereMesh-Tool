@@ -219,3 +219,9 @@ __marimo__/
 
 .npz
 /SMPL_models
+*.zip
+
+# PyInstaller build output
+/build
+/dist
+*.spec.bak

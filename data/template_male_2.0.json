@@ -3,16 +3,16 @@
   "spheres": [
     {
       "center": [
-        0.001,
-        0.378,
-        0.038
+        0.0012126488331635765,
+        0.37817604947149125,
+        0.03681622770352064
       ],
       "radius": 0.0589,
       "parent_joint": 12,
       "rest_offset": [
-        0.009900562602461044,
-        0.08876131116088554,
-        0.051593633249178844
+        0.010113211435624622,
+        0.08893736063237678,
+        0.05040986095269948
       ],
       "secondary_joint": 15,
       "secondary_rest_offset": [
@@ -23,7 +23,7 @@
       "lbs_weight": 0.0,
       "rest_radius": 0.9997604615161976,
       "nearest_vertex_index": 296,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -31,7 +31,7 @@
         0.219,
         -0.031
       ],
-      "radius": 0.0464,
+      "radius": 0.0394,
       "parent_joint": 17,
       "rest_offset": [
         -0.2443076627687076,
@@ -47,7 +47,7 @@
       "lbs_weight": 0.06473748413491887,
       "rest_radius": 1.0012141487814616,
       "nearest_vertex_index": 1696,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -55,7 +55,7 @@
         0.24,
         -0.043
       ],
-      "radius": 0.028399999999999998,
+      "radius": 0.038,
       "parent_joint": 19,
       "rest_offset": [
         -0.06418378692543003,
@@ -71,7 +71,7 @@
       "lbs_weight": 0.760204755788775,
       "rest_radius": 1.0071200318752789,
       "nearest_vertex_index": 1654,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -151,7 +151,7 @@
         0.22,
         -0.038
       ],
-      "radius": 0.0397,
+      "radius": 0.041,
       "parent_joint": 19,
       "rest_offset": [
         -0.03418015496247362,
@@ -167,7 +167,7 @@
       "lbs_weight": 0.8738350852843393,
       "rest_radius": 1.050491629796782,
       "nearest_vertex_index": 1743,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -751,7 +751,7 @@
         0.219,
         -0.031
       ],
-      "radius": 0.0464,
+      "radius": 0.0394,
       "parent_joint": 17,
       "rest_offset": [
         0.2443076627687076,
@@ -767,7 +767,7 @@
       "lbs_weight": 0.06473748413491887,
       "rest_radius": 1.0012141487814616,
       "nearest_vertex_index": 1696,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -775,7 +775,7 @@
         0.24,
         -0.043
       ],
-      "radius": 0.02,
+      "radius": 0.038,
       "parent_joint": 19,
       "rest_offset": [
         0.06418378692543003,
@@ -791,7 +791,7 @@
       "lbs_weight": 0.760204755788775,
       "rest_radius": 1.0071200318752789,
       "nearest_vertex_index": 1654,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -871,7 +871,7 @@
         0.22,
         -0.038
       ],
-      "radius": 0.02,
+      "radius": 0.041,
       "parent_joint": 19,
       "rest_offset": [
         0.03418015496247362,
@@ -887,7 +887,7 @@
       "lbs_weight": 0.8738350852843393,
       "rest_radius": 1.050491629796782,
       "nearest_vertex_index": 1743,
-      "locked": true
+      "locked": false
     },
     {
       "center": [
@@ -1635,9 +1635,9 @@
     },
     {
       "center": [
-        -0.06432916576460564,
-        0.2168547187011252,
-        0.03324954914480491
+        -0.064,
+        0.217,
+        0.033
       ],
       "radius": 0.043,
       "parent_joint": 9,
@@ -1712,13 +1712,21 @@
         0.038
       ],
       "radius": 0.122,
-      "parent_joint": null,
-      "rest_offset": null,
-      "secondary_joint": null,
-      "secondary_rest_offset": null,
-      "lbs_weight": 1.0,
-      "rest_radius": null,
-      "nearest_vertex_index": null,
+      "parent_joint": 3,
+      "rest_offset": [
+        -0.023265770661101064,
+        0.07938562086613227,
+        0.04780142869490859
+      ],
+      "secondary_joint": 6,
+      "secondary_rest_offset": [
+        -0.027754211239751487,
+        -0.05857077328347737,
+        0.020981102154080312
+      ],
+      "lbs_weight": 0.3865203929311716,
+      "rest_radius": 1.0413199363590084,
+      "nearest_vertex_index": 6292,
       "locked": false
     },
     {
@@ -1728,29 +1736,45 @@
         0.035
       ],
       "radius": 0.127,
-      "parent_joint": null,
-      "rest_offset": null,
-      "secondary_joint": null,
-      "secondary_rest_offset": null,
-      "lbs_weight": 1.0,
-      "rest_radius": null,
-      "nearest_vertex_index": null,
+      "parent_joint": 3,
+      "rest_offset": [
+        0.020734229338898937,
+        0.07838562086613227,
+        0.04480142869490859
+      ],
+      "secondary_joint": 6,
+      "secondary_rest_offset": [
+        0.016245788760248514,
+        -0.059570773283477374,
+        0.017981102154080317
+      ],
+      "lbs_weight": 0.3875787875373503,
+      "rest_radius": 1.0697617238135562,
+      "nearest_vertex_index": 3023,
       "locked": false
     },
     {
       "center": [
-        -0.017378260142685002,
-        -0.14581882516491565,
-        0.05382797753950059
+        -0.017,
+        -0.146,
+        0.054
       ],
       "radius": 0.118,
-      "parent_joint": null,
-      "rest_offset": null,
-      "secondary_joint": null,
-      "secondary_rest_offset": null,
-      "lbs_weight": 1.0,
-      "rest_radius": null,
-      "nearest_vertex_index": null,
+      "parent_joint": 0,
+      "rest_offset": [
+        -0.01482631970401552,
+        0.09478917144072346,
+        0.025416207101366016
+      ],
+      "secondary_joint": 3,
+      "secondary_rest_offset": [
+        -0.019265770661101064,
+        -0.029614379133867733,
+        0.0638014286949086
+      ],
+      "lbs_weight": 0.3664657343561206,
+      "rest_radius": 1.0280794121329058,
+      "nearest_vertex_index": 3500,
       "locked": false
     },
     {
@@ -1760,13 +1784,21 @@
         0.045
       ],
       "radius": 0.122,
-      "parent_joint": null,
-      "rest_offset": null,
-      "secondary_joint": null,
-      "secondary_rest_offset": null,
-      "lbs_weight": 1.0,
-      "rest_radius": null,
-      "nearest_vertex_index": null,
+      "parent_joint": 0,
+      "rest_offset": [
+        0.02017368029598448,
+        0.09378917144072346,
+        0.016416207101366015
+      ],
+      "secondary_joint": 3,
+      "secondary_rest_offset": [
+        0.015734229338898936,
+        -0.030614379133867733,
+        0.05480142869490859
+      ],
+      "lbs_weight": 0.34428199600542264,
+      "rest_radius": 1.0261607829008241,
+      "nearest_vertex_index": 679,
       "locked": false
     }
   ],
@@ -2377,6 +2409,12 @@
         71,
         73,
         74
+      ]
+    },
+    {
+      "indices": [
+        0,
+        22
       ]
     }
   ]

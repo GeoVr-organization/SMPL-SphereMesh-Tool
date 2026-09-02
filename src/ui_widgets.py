@@ -1,6 +1,7 @@
 import csv
 import importlib.util
 import json
+from datetime import datetime
 import random
 import tempfile
 import os
@@ -9,16 +10,25 @@ import numpy as np
 import pyvista as pv
 import vtk
 from matplotlib.colors import LinearSegmentedColormap
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedLayout, QHBoxLayout, QSlider, QLabel, QPushButton, QCheckBox, QComboBox, QMenuBar, QMenu, QGroupBox, QDoubleSpinBox, QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QScrollArea, QListWidget, QLineEdit, QPlainTextEdit
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedLayout, QHBoxLayout, QSlider, QLabel, QPushButton, QCheckBox, QComboBox, QMenuBar, QMenu, QGroupBox, QDoubleSpinBox, QSpinBox, QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QScrollArea, QListWidget, QLineEdit, QPlainTextEdit, QButtonGroup
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
 from pyvistaqt import QtInteractor
 import torch as tc
 
+from src.app_paths import data_file, resource_path, user_data_dir
+from src.sphere_fit import MAX_PROTRUSION_WEIGHT
 from src.sphere_manager import SphereManager
 from smpl_pytorch.smpl import JOINT_INDEX_TO_LABEL
 from src.export_smpl_fbx import export_smpl_to_fbx
 from src.smpl_forward_compat import my_function_forward
+from src.smpl_models import (
+    GENDER_TO_DISPLAY_NAME,
+    GENDERS,
+    MALE,
+    load_smpl_model,
+    spheremesh_template_path,
+)
 
 from src.utils import measure_time
 
@@ -39,7 +49,9 @@ DEFAULT_BETA: tuple[float, ...] = (
 BETA_SLIDER_INT_MIN = -20
 BETA_SLIDER_INT_MAX = 20
 
-_RANDOM_POSE_CSV = Path(__file__).resolve().parent.parent / "data" / "random_pose.csv"
+SPHEREMESH_TXT_TITLE = "Sphere Mesh 2.0"
+
+_RANDOM_POSE_CSV = data_file("random_pose.csv")
 
 
 def _random_pose_csv_column_order():
@@ -65,6 +77,30 @@ def _format_beta_label(v: float) -> str:
     if av >= 1000 or av < 1e-3:
         return f"{v:.6g}"
     return f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+_NON_INTERACTIVE = os.environ.get("SPHEREMESH_NON_INTERACTIVE", "") not in ("", "0", "false", "False")
+
+
+def set_non_interactive(enabled: bool) -> None:
+    """Run without blocking on modal dialogs, for headless and automated runs.
+
+    Qt modals block the event loop until a human dismisses them, which stalls a scripted run
+    indefinitely and, worse, does so silently: the script simply appears to hang. In this
+    mode the confirmations that would block answer themselves with the non-destructive
+    choice (unsaved changes are discarded, since a script that wanted them kept would have
+    saved), and informational reports print to stdout instead of opening a box.
+
+    Defaults from the SPHEREMESH_NON_INTERACTIVE environment variable so a runner can set it
+    without importing this module.
+    """
+    global _NON_INTERACTIVE
+    _NON_INTERACTIVE = bool(enabled)
+
+
+def is_non_interactive() -> bool:
+    """True when modal dialogs are being suppressed; see set_non_interactive."""
+    return _NON_INTERACTIVE
 
 
 def default_beta_tensor() -> tc.Tensor:
@@ -304,6 +340,178 @@ class ImportObjDialog(QDialog):
             "color": self._color_combo.currentData(),
             "center": self._center_check.isChecked(),
         }
+
+
+class FitSpheresDialog(QDialog):
+    """Options for the geometric least-squares sphere fit.
+
+    The centre displacement cap is the only real knob: it trades surface accuracy against
+    how far the spheres drift off the medial axis, and on flat regions it is what stops the
+    fit running away to the plane limit. See src/sphere_fit.py for why.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Fit Spheres to Body")
+        layout = QFormLayout(self)
+
+        self._offset_spin = QDoubleSpinBox()
+        self._offset_spin.setDecimals(1)
+        self._offset_spin.setRange(0.0, 200.0)
+        self._offset_spin.setSingleStep(1.0)
+        self._offset_spin.setValue(10.0)
+        self._offset_spin.setSuffix(" mm")
+        self._offset_spin.setToolTip(
+            "Hard cap on how far each sphere centre may move from where it is now. "
+            "0 fits radii only and leaves every centre exactly in place."
+        )
+        layout.addRow("Max centre offset:", self._offset_spin)
+
+        self._band_spin = QDoubleSpinBox()
+        self._band_spin.setDecimals(1)
+        self._band_spin.setRange(1.0, 500.0)
+        self._band_spin.setSingleStep(5.0)
+        self._band_spin.setValue(50.0)
+        self._band_spin.setSuffix(" mm")
+        self._band_spin.setToolTip(
+            "Only body vertices already within this distance of the sphere mesh are fitted. "
+            "Hands, feet and the skull cap are covered by no sphere; leaving them in drags "
+            "the nearest spheres toward them and wrecks the torso."
+        )
+        layout.addRow("Band half-width:", self._band_spin)
+
+        self._protrusion_spin = QDoubleSpinBox()
+        self._protrusion_spin.setDecimals(1)
+        self._protrusion_spin.setRange(1.0, MAX_PROTRUSION_WEIGHT)
+        self._protrusion_spin.setSingleStep(1.0)
+        self._protrusion_spin.setValue(10.0)
+        self._protrusion_spin.setToolTip(
+            "How much harder a sphere poking through the surface is penalised than a gap. "
+            "At 1 the fit is a plain surface fit, whose best radius is the mean distance to "
+            "the assigned vertices rather than the smallest, so every sphere inflates until "
+            "it protrudes. Larger values approach the inscribed sphere. Expect the reported "
+            "RMS to rise as this goes up; that is the point."
+        )
+        layout.addRow("Protrusion penalty:", self._protrusion_spin)
+
+        self._assign_scale_spin = QDoubleSpinBox()
+        self._assign_scale_spin.setDecimals(2)
+        self._assign_scale_spin.setRange(1.0, 20.0)
+        self._assign_scale_spin.setSingleStep(0.25)
+        self._assign_scale_spin.setValue(1.75)
+        self._assign_scale_spin.setToolTip(
+            "A vertex is only fitted to a sphere when it lies within this multiple of that "
+            "sphere's radius. Bounds the cells of spheres at the end of a chain, whose "
+            "Voronoi region is otherwise unbounded outwards."
+        )
+        layout.addRow("Assign radius scale:", self._assign_scale_spin)
+
+        self._min_radius_spin = QDoubleSpinBox()
+        self._min_radius_spin.setDecimals(1)
+        self._min_radius_spin.setRange(0.1, 100.0)
+        self._min_radius_spin.setSingleStep(1.0)
+        self._min_radius_spin.setValue(1.0)
+        self._min_radius_spin.setSuffix(" mm")
+        self._min_radius_spin.setToolTip("Lower bound on every fitted radius.")
+        layout.addRow("Min radius:", self._min_radius_spin)
+
+        self._outer_spin = QSpinBox()
+        self._outer_spin.setRange(1, 200)
+        self._outer_spin.setValue(60)
+        self._outer_spin.setToolTip(
+            "Maximum reassign-and-fit rounds. The run also stops on its own once the "
+            "objective stops decreasing."
+        )
+        layout.addRow("Max iterations:", self._outer_spin)
+
+        self._locks_check = QCheckBox("Keep locked spheres fixed")
+        self._locks_check.setChecked(True)
+        self._locks_check.setToolTip(
+            "Locked spheres are held at their current centre and radius. They still take "
+            "part in the assignment, so they keep covering their region of the surface."
+        )
+        layout.addRow(self._locks_check)
+
+        self._buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self._buttons.accepted.connect(self.accept)
+        self._buttons.rejected.connect(self.reject)
+        layout.addRow(self._buttons)
+
+    def get_options(self) -> dict:
+        return {
+            "max_offset": self._offset_spin.value() / 1000.0,
+            "band_max": self._band_spin.value() / 1000.0,
+            "min_radius": self._min_radius_spin.value() / 1000.0,
+            "max_outer": int(self._outer_spin.value()),
+            "protrusion_weight": self._protrusion_spin.value(),
+            "assign_radius_scale": self._assign_scale_spin.value(),
+            "respect_locks": self._locks_check.isChecked(),
+        }
+
+
+class GenderSelector(QGroupBox):
+    """Two exclusive buttons selecting which gendered SMPL body model is displayed."""
+
+    genderChanged = pyqtSignal(str)  # emits MALE or FEMALE when the selection changes
+
+    def __init__(self, initial_gender: str = MALE, parent=None):
+        super().__init__("Body Model", parent)
+
+        self.gender = initial_gender
+        self.gender_buttons = {}
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Setup the UI components"""
+        layout = QHBoxLayout()
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        self.button_group = QButtonGroup(self)
+        self.button_group.setExclusive(True)
+
+        for gender in GENDERS:
+            button = QPushButton(GENDER_TO_DISPLAY_NAME[gender])
+            button.setCheckable(True)
+            button.setChecked(gender == self.gender)
+            button.setToolTip(
+                f"Use the {GENDER_TO_DISPLAY_NAME[gender].lower()} SMPL body model "
+                "(spheres and current beta/theta values are kept)."
+            )
+            button.setStyleSheet("""
+                QPushButton { background-color: #e0e0e0; color: #333333; border: none;
+                    border-radius: 4px; padding: 6px; }
+                QPushButton:hover { background-color: #d0d0d0; }
+                QPushButton:checked { background-color: #3498db; color: white; font-weight: bold; }
+            """)
+            button.clicked.connect(lambda _checked, g=gender: self._on_gender_clicked(g))
+            self.button_group.addButton(button)
+            layout.addWidget(button)
+            self.gender_buttons[gender] = button
+
+        self.setLayout(layout)
+
+    def _on_gender_clicked(self, gender: str):
+        """Emit the change only when the clicked button is not the active one."""
+        if gender == self.gender:
+            return
+        self.gender = gender
+        self.genderChanged.emit(gender)
+
+    def set_gender(self, gender: str):
+        """Select *gender* without emitting genderChanged (e.g. to revert a failed switch)."""
+        if gender not in self.gender_buttons:
+            return
+        self.gender = gender
+        for candidate_gender, button in self.gender_buttons.items():
+            button.setChecked(candidate_gender == gender)
+
+    def get_gender(self) -> str:
+        """Currently selected gender"""
+        return self.gender
 
 
 class BetaSliderGroup(QGroupBox):
@@ -1408,10 +1616,11 @@ class MainWindow(QMainWindow):
     sphere_manager = None
     mesh_actor = None
 
-    def __init__(self, smpl_model):
+    def __init__(self, smpl_model, gender: str = MALE):
         super().__init__()
 
         self.smpl_model = smpl_model
+        self.gender = gender
         self.beta = default_beta_tensor()
 
         # Ortho axis views: repeat same letter (X/Y/Z) flips viewing direction
@@ -1576,7 +1785,15 @@ class MainWindow(QMainWindow):
         )
         self.check_symmetry_button.clicked.connect(self.check_x_symmetry_clicked)
         self.ui_layout.addWidget(self.check_symmetry_button)
-        
+
+        self.fit_spheres_button = QPushButton("Fit Spheres to Body…")
+        self.fit_spheres_button.setToolTip(
+            "Least-squares fit every sphere centre and radius to the body surface, "
+            "capped by a maximum centre displacement. Topology is untouched."
+        )
+        self.fit_spheres_button.clicked.connect(self.fit_spheres_clicked)
+        self.ui_layout.addWidget(self.fit_spheres_button)
+
         # Add save button
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_file)
@@ -1638,6 +1855,11 @@ class MainWindow(QMainWindow):
         )
         self.load_beta_offsets_button.clicked.connect(self.load_beta_offsets_clicked)
         self.ui_layout.addWidget(self.load_beta_offsets_button)
+
+        # Gender switch, sitting right above the beta controls
+        self.gender_selector = GenderSelector(self.gender)
+        self.gender_selector.genderChanged.connect(self._on_gender_changed)
+        self.ui_layout.addWidget(self.gender_selector)
 
         # Add beta slider group
         self.beta_slider_group = BetaSliderGroup()
@@ -1767,7 +1989,7 @@ class MainWindow(QMainWindow):
             self._position_clip_planes_panel(center_right_container)
         center_right_container.resizeEvent = on_resize
 
-        load_path = Path(__file__).resolve().parent.parent / "data" / "template_male_1.0.json"
+        load_path = spheremesh_template_path(self.gender)
         try:
             self.sphere_manager.load_from_json(str(load_path))
             self.sphere_manager.initialize_radius_scaling_from_mesh(mesh)
@@ -2099,6 +2321,120 @@ class MainWindow(QMainWindow):
         for actor in self._skeleton_joint_actors:
             actor.SetVisibility(1 if self._skeleton_visible else 0)
     
+    def _report(self, title: str, text: str, icon=QMessageBox.Icon.Information) -> None:
+        """Show an informational box, or print it when running non-interactively."""
+        if is_non_interactive():
+            print(f"[{title}] {text}")
+            return
+        message_box = QMessageBox(self)
+        message_box.setIcon(icon)
+        message_box.setWindowTitle(title)
+        message_box.setText(text)
+        message_box.exec()
+
+    def _confirm_discarding_unsaved_changes(self, title: str, consequence: str) -> bool:
+        """Ask what to do with unsaved sphere edits. Returns True to go ahead."""
+        if self.sphere_manager is None or not self.sphere_manager.has_unsaved_changes:
+            return True
+        if is_non_interactive():
+            print(f"[{title}] discarding unsaved sphere changes (non-interactive mode)")
+            return True
+
+        message_box = QMessageBox(self)
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setWindowTitle(title)
+        message_box.setText("The sphere configuration has unsaved changes.")
+        message_box.setInformativeText(
+            f"{consequence}\n\n"
+            "Saving asks where to put the .txt and archives a timestamped JSON in "
+            f"{self._save_data_dir()}."
+        )
+        message_box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        message_box.setDefaultButton(QMessageBox.StandardButton.Save)
+        choice = message_box.exec()
+
+        if choice == QMessageBox.StandardButton.Discard:
+            return True
+        if choice != QMessageBox.StandardButton.Save:
+            return False
+
+        # save_file reports its own failures; a False here also covers the user
+        # backing out of the Save As dialog.
+        return self.save_file()
+
+    def closeEvent(self, event):
+        """Give the user a chance to save sphere edits before the window goes away."""
+        if self._confirm_discarding_unsaved_changes(
+            "Quit", "Closing the window will discard them."
+        ):
+            event.accept()
+        else:
+            event.ignore()
+
+    def _load_spheremesh_template_for_gender(self, gender: str):
+        """Replace the sphere configuration with the template shipped for *gender*."""
+        template_path = spheremesh_template_path(gender)
+        try:
+            self.sphere_manager.load_from_json(str(template_path))
+        except (ValueError, OSError, json.JSONDecodeError) as e:
+            QMessageBox.warning(
+                self,
+                "Body model",
+                f"Switched to the {GENDER_TO_DISPLAY_NAME.get(gender, gender)} body model, "
+                f"but its sphere template could not be loaded:\n{template_path}\n{e}",
+            )
+
+    def _on_gender_changed(self, gender: str):
+        """Swap the SMPL body model and load that gender's sphere template.
+
+        Current betas and pose are kept; sphere edits are replaced by the template,
+        so the user is asked what to do with them first.
+        """
+        previous_gender = self.gender
+        if not self._confirm_discarding_unsaved_changes(
+            "Body model",
+            f"Switching to the {GENDER_TO_DISPLAY_NAME.get(gender, gender)} body model "
+            "loads its sphere template and will discard them.",
+        ):
+            self.gender_selector.set_gender(previous_gender)
+            return
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            smpl_model = load_smpl_model(gender)
+        except (FileNotFoundError, ValueError, OSError) as e:
+            QApplication.restoreOverrideCursor()
+            self.gender_selector.set_gender(previous_gender)
+            QMessageBox.warning(
+                self,
+                "Body model",
+                f"Could not load the {GENDER_TO_DISPLAY_NAME.get(gender, gender)} SMPL model:\n{e}",
+            )
+            return
+
+        self.gender = gender
+        self.smpl_model = smpl_model
+
+        # Skinning weights and the rest skeleton belong to the old model; rebuild both.
+        if getattr(smpl_model, "weights", None) is not None:
+            self.sphere_manager.set_skinning_weights(
+                smpl_model.weights.detach().cpu().numpy()
+            )
+        self.sphere_manager.rest_skeleton = None
+
+        try:
+            # Template first: update_smplmodel then rebuilds the rest skeleton and runs
+            # FK on the spheres that just came in.
+            self._load_spheremesh_template_for_gender(gender)
+            self.update_smplmodel(update_radius=True, update_pose=True)
+            self._post_load_refresh()
+        finally:
+            QApplication.restoreOverrideCursor()
+
     def _on_beta_changed(self, beta):
         """Handle beta value changes from slider group"""
         self.beta = beta
@@ -2164,9 +2500,17 @@ class MainWindow(QMainWindow):
 
             self.plotter.render()
 
+    def _load_conversion_script(self, module_name: str):
+        """Import one of the scripts/ JSON-text converters by file path."""
+        script_path = resource_path("scripts", f"{module_name}.py")
+        spec = importlib.util.spec_from_file_location(module_name, script_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
     def _get_json_load_path_from_dialog(self, title: str):
         """Return a JSON file path ready for sphere_manager loading (supports .txt via conversion)."""
-        data_dir = str(Path(__file__).resolve().parent.parent / "data")
+        data_dir = str(user_data_dir())
         filepath, _ = QFileDialog.getOpenFileName(
             self,
             title,
@@ -2179,10 +2523,7 @@ class MainWindow(QMainWindow):
         path = Path(filepath)
         tmp_path = None
         if path.suffix.lower() == ".txt":
-            txt2json_path = Path(__file__).resolve().parent.parent / "scripts" / "txt2json.py"
-            spec = importlib.util.spec_from_file_location("txt2json", txt2json_path)
-            txt2json_mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(txt2json_mod)
+            txt2json_mod = self._load_conversion_script("txt2json")
 
             text = path.read_text(encoding="utf-8")
             payload = txt2json_mod.convert_text_to_json_payload(text)
@@ -2266,15 +2607,84 @@ class MainWindow(QMainWindow):
                 except OSError:
                     pass
 
-    def save_file(self):
-        # Save the mesh
-        print("Save file method called")
-        save_path = Path(__file__).resolve().parent.parent / "data" / "save1.json"
-        self.sphere_manager.save_to_json(str(save_path))
+    def _save_data_dir(self) -> Path:
+        """Directory holding the timestamped JSON archive of every save."""
+        return user_data_dir()
+
+    def _timestamped_save_stem(self) -> str:
+        """Base name for this save that is not taken yet, e.g. ``save_01092026_1022``.
+
+        Two saves within the same minute get a ``_2``, ``_3``… suffix, so an
+        earlier archive is never overwritten.
+        """
+        data_dir = self._save_data_dir()
+        base_stem = datetime.now().strftime("save_%d%m%Y_%H%M")
+        stem = base_stem
+        duplicate_index = 2
+        while (data_dir / f"{stem}.json").exists():
+            stem = f"{base_stem}_{duplicate_index}"
+            duplicate_index += 1
+        return stem
+
+    def save_file(self) -> bool:
+        """Archive the spheres as timestamped JSON and write a .txt the user names.
+
+        Returns False when the user cancels the Save As dialog or the JSON could
+        not be written, so callers know nothing was saved.
+        """
+        data_dir = self._save_data_dir()
+        stem = self._timestamped_save_stem()
+
+        # getSaveFileName asks for confirmation itself when an existing .txt is picked.
+        selected_txt_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save SphereMesh As",
+            str(data_dir / f"{stem}.txt"),
+            "SphereMesh text files (*.txt);;All files (*)",
+        )
+        if not selected_txt_path:
+            print("Save cancelled")
+            return False
+
+        txt_path = Path(selected_txt_path)
+        if txt_path.suffix.lower() != ".txt":
+            txt_path = txt_path.with_suffix(".txt")
+
+        json_path = data_dir / f"{stem}.json"
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            self.sphere_manager.save_to_json(str(json_path))
+        except (OSError, ValueError, TypeError) as e:
+            QMessageBox.critical(
+                self,
+                "Save",
+                f"Could not write the sphere configuration to:\n{json_path}\n{e}",
+            )
+            return False
+
+        # The JSON is safely on disk from here on: a failing .txt is reported but
+        # does not turn the save into a failure.
+        try:
+            json2txt_mod = self._load_conversion_script("json2txt")
+            text = json2txt_mod.convert_json_to_text(
+                input_path=json_path, title=SPHEREMESH_TXT_TITLE
+            )
+            txt_path.write_text(text, encoding="utf-8")
+        except (OSError, ValueError, KeyError) as e:
+            QMessageBox.warning(
+                self,
+                "Save",
+                f"Saved {json_path.name}, but the text file could not be written:"
+                f"\n{txt_path}\n{e}",
+            )
+            return True
+
+        print(f"SphereMesh saved to {json_path} and {txt_path}")
+        return True
 
     def load_beta_offsets_clicked(self):
         """Load all beta*.csv files from the fixed data/offsets directory."""
-        data_dir = Path(__file__).resolve().parent.parent / "data" / "offsets"
+        data_dir = data_file("offsets")
         if self.sphere_manager.get_sphere_count() == 0:
             QMessageBox.warning(
                 self,
@@ -2374,7 +2784,7 @@ class MainWindow(QMainWindow):
 
     def import_obj_clicked(self):
         """Pick an OBJ file in a modal dialog and render it in the scene."""
-        default_dir = str(Path(__file__).resolve().parent.parent / "data")
+        default_dir = str(user_data_dir())
         dlg = ImportObjDialog(self, default_dir)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -2434,13 +2844,14 @@ class MainWindow(QMainWindow):
         count = len(self._imported_mesh_actors)
         if count == 0:
             return
-        reply = QMessageBox.question(
-            self,
-            "Clear Imported Meshes",
-            f"Remove {count} imported mesh{'es' if count != 1 else ''} from the scene?",
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        if not is_non_interactive():
+            reply = QMessageBox.question(
+                self,
+                "Clear Imported Meshes",
+                f"Remove {count} imported mesh{'es' if count != 1 else ''} from the scene?",
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
         for actor in self._imported_mesh_actors:
             self.plotter.remove_actor(actor, reset_camera=False)
         self._imported_mesh_actors.clear()
@@ -2506,6 +2917,127 @@ class MainWindow(QMainWindow):
             "X Symmetry Check",
             f"Found {len(issues)} symmetry issue(s):\n\n{text}",
         )
+
+    def fit_spheres_clicked(self):
+        """Run the geometric least-squares sphere fit against the current body surface."""
+        if not self.sphere_manager or self.sphere_manager.get_sphere_count() == 0:
+            self._report("Fit Spheres", "Load a sphere configuration first.")
+            return
+        mesh = None
+        if getattr(self, "mesh_actor", None) is not None:
+            mesh_vtk = self.mesh_actor.GetMapper().GetInput()
+            if mesh_vtk is not None:
+                mesh = pv.wrap(mesh_vtk)
+        if mesh is None:
+            self._report(
+                "Fit Spheres", "No body mesh in the scene to fit against.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+
+        dialog = FitSpheresDialog(self)
+        if is_non_interactive():
+            options = dialog.get_options()
+        else:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            options = dialog.get_options()
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            info = self.sphere_manager.fit_spheres_to_mesh(mesh, **options)
+        except RuntimeError as error:
+            self._report("Fit Spheres", str(error), QMessageBox.Icon.Warning)
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        if info is None:
+            self._report(
+                "Fit Spheres",
+                "Nothing to fit: no body vertices fell inside the band. Try a larger band "
+                "half-width.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+
+        self.plotter.render()
+        self._report("Fit Spheres", self._format_fit_report(info))
+
+    @staticmethod
+    def _format_fit_report(info: dict) -> str:
+        """Fit report as plain text, led by the protrusion figure rather than by RMS.
+
+        The negative-residual fraction comes first because it, not RMS, is what the fit is
+        steered by. RMS is the symmetric squared error, and the protrusion penalty
+        deliberately declines to minimise it: a sphere that stops poking through the surface
+        scores worse on RMS than one that splits the difference. Both RMS columns are still
+        shown, and they can move in opposite directions to each other as well, since the
+        full metric also counts the tapered segments that already cover much of the body.
+        """
+        spheres_before = info["rms_spheres_before"] * 1000.0
+        spheres_after = info["rms_spheres_after"] * 1000.0
+        full_before = info["rms_full_before"] * 1000.0
+        full_after = info["rms_full_after"] * 1000.0
+        lines = [
+            f"Fitted against {info['band_size'] - info['unassigned']} of "
+            f"{info['mesh_size']} body vertices in {len(info['iterations'])} iteration(s).",
+            "",
+            f"Vertices the spheres poke through:  "
+            f"{info['negative_fraction_before'] * 100:.1f}% -> "
+            f"{info['negative_fraction_after'] * 100:.1f}%",
+            f"Median gap to the surface        :  "
+            f"{np.nanmedian(info['per_sphere']['median_residual']) * 1000:.2f} mm",
+            "",
+            f"RMS, spheres only :  {spheres_before:7.3f} -> {spheres_after:7.3f} mm",
+            f"RMS, full metric  :  {full_before:7.3f} -> {full_after:7.3f} mm"
+            + ("   (worse)" if full_after > full_before else ""),
+            "",
+            f"Centre displacement:  max {info['max_displacement'] * 1000:.2f} mm, "
+            f"mean {info['mean_displacement'] * 1000:.2f} mm",
+            f"Radius change      :  max |dr| {info['max_radius_change'] * 1000:.2f} mm, "
+            f"mean dr {info['mean_radius_change'] * 1000:.2f} mm",
+            f"Spheres at the offset cap: {info['iterations'][-1]['at_max_offset']}",
+            f"Vertices outside every sphere's assign radius: {info['unassigned']}",
+        ]
+        if info["locked_skipped"]:
+            lines.append(f"Locked spheres held fixed: {info['locked_skipped']}")
+        if info["frozen_empty"]:
+            lines.append(
+                f"Spheres no vertex selected ({len(info['frozen_empty'])}): "
+                f"{info['frozen_empty']}"
+            )
+        if info["frozen_sparse"]:
+            lines.append(
+                f"Spheres with fewer than 4 vertices ({len(info['frozen_sparse'])}): "
+                f"{info['frozen_sparse']}"
+            )
+        if info["degenerate_points"]:
+            lines.append(f"Degenerate vertices guarded: {info['degenerate_points']}")
+        if info["rolled_back"]:
+            lines.append(
+                "\nStopped when the next reassignment would have raised the objective; "
+                "that round was rolled back, so the result above is the best one found. "
+                "A smaller maximum centre offset usually avoids it."
+            )
+        if not info["converged"] and not info["rolled_back"]:
+            lines.append(
+                "\nStopped at the iteration limit before the fit settled. Raise "
+                "Max iterations for a tighter result."
+            )
+        if spheres_after > spheres_before and info["protrusion_weight"] > 1.0:
+            lines.append(
+                "\nSpheres-only RMS rose. That is expected with a protrusion penalty above "
+                "1: RMS is the symmetric error, and it scores a sphere that splits the "
+                "difference better than one that stays inside the surface. Read the "
+                "protrusion percentage instead."
+            )
+        if full_after > full_before:
+            lines.append(
+                "\nThe full metric got worse. The spheres now protrude through regions the "
+                "tapered segments covered; fitting the segments too is the next step."
+            )
+        return "\n".join(lines)
 
     def add_connection_clicked(self):
         if not self.sphere_manager:

@@ -18,6 +18,7 @@ import numpy as np
 
 from src.managed_sphere import ManagedSphere
 from src.sphere_connection import SphereConnection
+from src.sphere_fit import optimize_spheres, select_band
 
 from src.utils import measure_time
 
@@ -56,6 +57,10 @@ class SphereManager:
         self.rest_mesh_points = None   # (N_verts, 3) float array at rest pose
         self.lock_button_callback = None
         self.refocus_callback = None
+
+        # True when spheres/connections were edited since the last save or load.
+        # Pose/shape driven updates (FK, beta offsets, previews) do not set this.
+        self.has_unsaved_changes = False
 
         self.normal_color = "lightblue"
         self.selected_color = "cyan"
@@ -138,6 +143,14 @@ class SphereManager:
             for c in self.connections:
                 c.update_mesh()
             self.update_sphere_information_callback()
+
+    def mark_unsaved_changes(self) -> None:
+        """Record that the sphere configuration diverged from the last saved/loaded file."""
+        self.has_unsaved_changes = True
+
+    def clear_unsaved_changes(self) -> None:
+        """Record that the sphere configuration matches the last saved/loaded file."""
+        self.has_unsaved_changes = False
 
     def set_spheremesh_toggle_callback(self, callback):
         self.spheremesh_toggle_callback = callback
@@ -369,6 +382,7 @@ class SphereManager:
             self._call_lock_button_callback()
         if self._uniform_radius_override_active:
             self._refresh_all_connection_meshes()
+        self.mark_unsaved_changes()
         print(f"Added sphere #{self.selected_sphere_index}")
         return self.selected_sphere_index
 
@@ -410,6 +424,7 @@ class SphereManager:
         conn.set_connector_visibility(self.sphere_widgets_visible)
         self._highlight_selection()
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
         print(f"Added connection {conn.sphere_indices}")
         return True
 
@@ -420,6 +435,7 @@ class SphereManager:
             return False
         self._delete_sphere_at_index(si)
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
         print("Deleted sphere")
         return True
 
@@ -461,6 +477,7 @@ class SphereManager:
         self.connections.remove(conn)
         self._highlight_selection()
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
         return True
 
     def _on_sphere_interaction(self, sphere_index: int, center):
@@ -495,6 +512,7 @@ class SphereManager:
             c.update_mesh()
         self._apply_mirror_to_twin(sphere_index, mirror_center=True, mirror_radius=True)
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
 
     def toggle_lock_selected_pair(self):
         """Legacy: lock all spheres in first incident connection; if orphan, toggle that sphere."""
@@ -517,6 +535,7 @@ class SphereManager:
             c.refresh_style()
         if self.lock_button_callback:
             self._call_lock_button_callback()
+        self.mark_unsaved_changes()
         return True
 
     def toggle_lock_selected_sphere(self):
@@ -530,6 +549,7 @@ class SphereManager:
             c.refresh_style()
         if self.lock_button_callback:
             self._call_lock_button_callback()
+        self.mark_unsaved_changes()
         return True
 
     def toggle_lock_sphere_at_display_slot(self, local_slot: int) -> bool:
@@ -548,6 +568,7 @@ class SphereManager:
             c.refresh_style()
         if self.lock_button_callback:
             self._call_lock_button_callback()
+        self.mark_unsaved_changes()
         return True
 
     def _call_lock_button_callback(self):
@@ -581,6 +602,7 @@ class SphereManager:
             c.update_mesh()
         self._apply_mirror_to_twin(global_index, mirror_center=True, mirror_radius=False)
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
 
     def set_sphere_radius_global(self, global_index: int, new_radius):
         if global_index < 0 or global_index >= len(self.spheres):
@@ -601,6 +623,7 @@ class SphereManager:
             c.update_mesh()
         self._apply_mirror_to_twin(global_index, mirror_center=False, mirror_radius=True)
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
 
     def grow_sphere(self, mesh, sphere_index):
         """sphere_index is UI local slot; resolved via current display endpoints."""
@@ -632,6 +655,7 @@ class SphereManager:
             c.update_mesh()
         self._apply_mirror_to_twin(gidx, mirror_center=False, mirror_radius=True)
         self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
 
     def _unhighlight_all(self):
         for s in self.spheres:
@@ -775,6 +799,7 @@ class SphereManager:
             return
         for i in range(len(self.spheres)):
             self.assign_parent_joint(i)
+        self.mark_unsaved_changes()
         #self.update_sphere_positions()
 
     def update_sphere_positions(self):
@@ -982,6 +1007,106 @@ class SphereManager:
         return heatmap
 
     # ---------------------------------------------------------------------------
+    # Geometric sphere fitting
+    # ---------------------------------------------------------------------------
+
+    def fit_spheres_to_mesh(
+        self,
+        mesh,
+        *,
+        max_offset: float,
+        band_max: float = 0.05,
+        min_radius: float = 1e-3,
+        max_outer: int = 60,
+        protrusion_weight: float = 10.0,
+        assign_radius_scale: float = 1.75,
+        respect_locks: bool = True,
+    ) -> Optional[dict]:
+        """Least-squares fit every sphere to the mesh surface, capped by ``max_offset``.
+
+        Delegates to ``src.sphere_fit.optimize_spheres``; see that module's docstring for
+        the objective, the degenerate direction and what the two reported RMS figures mean.
+        Topology is invariant: sphere count, order, connections and parent joints are
+        untouched, and only ``center`` and ``radius`` are written back.
+
+        ``protrusion_weight`` penalises a sphere poking through the surface harder than it
+        penalises a gap. At 1 the fit is a plain surface fit, whose minimiser in radius is
+        the mean assigned distance rather than the minimum, so every sphere inflates until
+        it protrudes; larger values approach the inscribed sphere that is actually wanted.
+        Expect the reported RMS to rise as it does, and judge the run by the
+        negative-residual fraction instead.
+
+        Locked spheres are frozen rather than dropped, so they keep covering their region
+        of the surface during assignment while never being solved for.
+
+        The band is computed from the sphere configuration and mesh as they stand when this
+        is called. Comparing RMS figures across two calls is only meaningful when the body
+        shape was the same for both, since a different shape gives a different band and
+        therefore a different point population.
+
+        Returns the optimiser ``info`` dict, or ``None`` when there is nothing to fit.
+        """
+        if mesh is None or not self.spheres:
+            return None
+        if self._uniform_radius_override_active:
+            raise RuntimeError(
+                "Turn off the uniform radius preview before fitting: it overrides the "
+                "displayed radii, so the fitted values could not be seen or saved."
+            )
+        points = np.asarray(mesh.points, dtype=np.float64)
+        if points.size == 0:
+            return None
+
+        centers = np.array([s.get_center() for s in self.spheres], dtype=np.float64)
+        radii = np.array([s.get_radius() for s in self.spheres], dtype=np.float64)
+        connections = [tuple(c.sphere_indices) for c in self.connections]
+        frozen = (
+            np.array([s.locked for s in self.spheres], dtype=bool)
+            if respect_locks
+            else np.zeros(len(self.spheres), dtype=bool)
+        )
+
+        band = select_band(points, centers, radii, connections, band_max=band_max)
+        if band.size < 4:
+            return None
+
+        new_centers, new_radii, info = optimize_spheres(
+            centers,
+            radii,
+            points[band],
+            max_offset=float(max_offset),
+            min_radius=float(min_radius),
+            max_outer=int(max_outer),
+            protrusion_weight=float(protrusion_weight),
+            assign_radius_scale=float(assign_radius_scale),
+            connections=connections,
+            frozen=frozen,
+        )
+
+        for index, sphere in enumerate(self.spheres):
+            if frozen[index]:
+                continue
+            sphere.set_center_force(new_centers[index])
+            sphere.set_radius_force(float(new_radii[index]))
+            parent = sphere.get_parent_joint()
+            rest_offset = sphere.get_rest_offset()
+            if self.skeleton is not None and parent is not None and rest_offset is not None:
+                joint_position = self.skeleton.joints[parent]
+                rotation = self.skeleton.get_joint_rotation(parent)
+                sphere.set_parent_joint(
+                    parent, np.dot(rotation.T, sphere.get_center() - joint_position)
+                )
+
+        self._refresh_all_connection_meshes()
+        self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
+
+        info["band_size"] = int(band.size)
+        info["mesh_size"] = int(points.shape[0])
+        info["locked_skipped"] = int(np.count_nonzero(frozen))
+        return info
+
+    # ---------------------------------------------------------------------------
     # Beta-offset API
     # ---------------------------------------------------------------------------
 
@@ -1148,6 +1273,7 @@ class SphereManager:
         }
         with open(filepath, "w") as f:
             json.dump(payload, f, indent=2)
+        self.clear_unsaved_changes()
         print(f"Sphere configuration saved to {filepath}")
 
     def _read_spheremesh_payload(self, filepath):
@@ -1269,6 +1395,7 @@ class SphereManager:
         if data is None:
             return
         self._build_from_payload(data, clear_existing=True)
+        self.clear_unsaved_changes()
         print(f"Sphere configuration loaded from {filepath}")
 
     def append_from_json(self, filepath):
@@ -1276,6 +1403,7 @@ class SphereManager:
         if data is None:
             return
         self._build_from_payload(data, clear_existing=False)
+        self.mark_unsaved_changes()
         print(f"Sphere configuration appended from {filepath}")
 
     def append_spheres_only_from_json(self, filepath):
@@ -1284,4 +1412,5 @@ class SphereManager:
         if data is None:
             return
         self._build_from_payload(data, clear_existing=False, with_connections=False)
+        self.mark_unsaved_changes()
         print(f"Spheres (no connections) appended from {filepath}")
