@@ -13,11 +13,14 @@ cones wearing a slab's name.
 sphere-mesh, measured with the exact metric in ``bumpers`` rather than
 ``sphere_fit.spheremesh_distance``, which never evaluates a triangle's slab and so scores a
 correct sheet as a hole. Positive is a gap, negative means the collider is outside the skin.
+<<<<<<< Updated upstream
 The report says *where* as well as how much: badly covered vertices are grouped into
 connected clusters over the mesh edges, and each cluster is described by its size, its
 worst value, its position, the joint that skins it, the direction it faces and the bumper
 that owns it. A missing midline column shows up as "every gap cluster faces front" long
 before anyone opens the result in a viewer.
+=======
+>>>>>>> Stashed changes
 
 **The walk-break rate.** This is the check the whole exercise exists for. A cloth node
 sliding across the body moves between neighbouring surface points; the solver's watchdog
@@ -34,6 +37,7 @@ afford, plus the mean walk length, plus the histogram behind both. Unlike a cove
 this punishes exactly the failure described in the brief: two bumpers overlapping in space
 with no topological link between them.
 
+<<<<<<< Updated upstream
 **Harmful overlap.** The same failure seen from the collider's side rather than the
 skin's. Each bumper's surface is sampled; a sample that is not buried by the bumper's own
 topological neighbourhood is *locally exposed*, and it is *harmful* when a bumper far away
@@ -49,6 +53,8 @@ animation (260 mm RMS across the elbow, measured). Every rim edge of every bumpe
 checked for that in the rest pose, and, when the generator says which joint it intended,
 the tool's rule is checked against the intention.
 
+=======
+>>>>>>> Stashed changes
 **The pose sweep.** All of the above again, under real poses. The body is re-evaluated with
 full SMPL skinning while the spheres are moved by the tool's *rigid, single-joint* rule, so
 any bumper that spans two joints which rotate relative to each other shows up as protrusion
@@ -57,39 +63,58 @@ exactly where the user would see it pop out.
 
 from __future__ import annotations
 
+<<<<<<< Updated upstream
 import json
+=======
+>>>>>>> Stashed changes
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
 import numpy as np
+<<<<<<< Updated upstream
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
+=======
+>>>>>>> Stashed changes
 
 from .anatomy import (
     JOINT_INDEX,
     JOINT_NAMES,
     Body,
     assign_parent_joint_like_tool,
+<<<<<<< Updated upstream
     joints_compatible,
     load_body,
     pose_spheres_like_tool,
 )
 from .bumpers import CONE, PRYSMOID, QUAD, SPHERE, BumperGraph, tangent_plane
+=======
+    load_body,
+    pose_spheres_like_tool,
+)
+from .bumpers import CONE, PRYSMOID, QUAD, SPHERE, BumperGraph
+>>>>>>> Stashed changes
 
 __all__ = [
     "Thresholds",
     "Report",
     "validate",
+<<<<<<< Updated upstream
     "format_report",
     "bumper_label",
+=======
+>>>>>>> Stashed changes
     "modelled_vertex_mask",
     "surface_edges",
     "walk_breaks",
     "non_adjacent_overlap",
+<<<<<<< Updated upstream
     "harmful_overlap",
     "bumper_surface_samples",
     "coverage_clusters",
     "joint_crossing_cones",
+=======
+>>>>>>> Stashed changes
 ]
 
 
@@ -119,6 +144,7 @@ class Thresholds:
     # still paying for itself.
     max_walk_break_fraction: float = 0.01
 
+<<<<<<< Updated upstream
     # Harmful overlap, global: over every bumper's *locally exposed* surface samples (those
     # not buried by a bumper within the walk radius), the fraction that a bumper further
     # away than the walk radius swallows anyway. Calibrated against the user's hand-made
@@ -137,6 +163,11 @@ class Thresholds:
     # there while differing five-fold globally, in the same direction as their walk-break
     # rates (3.68% against 1.83%).
     max_non_adjacent_overlap: float = 0.20
+=======
+    # Two bumpers that are not adjacent should barely interpenetrate. Measured as the
+    # fraction of one bumper's surface samples lying inside the other.
+    max_non_adjacent_overlap: float = 0.05
+>>>>>>> Stashed changes
 
     # Under pose the rigid binding cannot track skinning exactly and some slack is honest.
     posed_max_protrusion: float = 0.020
@@ -157,10 +188,13 @@ class Report:
     checks: list[Check] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
     worst: dict = field(default_factory=dict)
+<<<<<<< Updated upstream
     # The graph the report was computed on and the sphere names it was labelled with, so
     # ``format_report`` can label bumper indices after the fact.
     graph: BumperGraph | None = None
     names: list[str] | None = None
+=======
+>>>>>>> Stashed changes
 
     @property
     def passed(self) -> bool:
@@ -184,6 +218,7 @@ class Report:
         return "\n".join(lines)
 
 
+<<<<<<< Updated upstream
 # ---------------------------------------------------------------------------- labels
 
 
@@ -206,6 +241,8 @@ def bumper_label(graph: BumperGraph, index: int, names: Sequence[str] | None = N
     return f"{bumper.kind}[{', '.join(sphere_label(sphere, names) for sphere in bumper.spheres)}]"
 
 
+=======
+>>>>>>> Stashed changes
 # ------------------------------------------------------------------ body-side helpers
 
 
@@ -279,8 +316,12 @@ def walk_breaks(
 
     Returns ``(owner_per_point, hops_per_edge, tally_of_expensive_pairs)``, where a hop
     count of ``-1`` means the two bumpers are in different components of the graph and the
+<<<<<<< Updated upstream
     walk cannot get there at all. The tally is keyed by ``(bumper index, bumper index)``,
     lower index first, so the caller can label the pair however it likes.
+=======
+    walk cannot get there at all.
+>>>>>>> Stashed changes
 
     ``budget`` is how many hops the walk is assumed to afford before the fallback is
     cheaper. It has to be at least 2 to be fair: consecutive cones along a limb share a
@@ -294,13 +335,20 @@ def walk_breaks(
     hops = hop[first, second]
 
     expensive = (hops < 0) | (hops > int(budget))
+<<<<<<< Updated upstream
     tally: dict[tuple[int, int], int] = {}
     for left, right in zip(first[expensive], second[expensive]):
         key = (int(min(left, right)), int(max(left, right)))
+=======
+    tally: dict[tuple[str, str], int] = {}
+    for left, right in zip(first[expensive], second[expensive]):
+        key = tuple(sorted((str(graph.bumpers[left]), str(graph.bumpers[right]))))
+>>>>>>> Stashed changes
         tally[key] = tally.get(key, 0) + 1
     return owner, hops, tally
 
 
+<<<<<<< Updated upstream
 def _unit_directions(generator: np.random.Generator, count: int) -> np.ndarray:
     direction = generator.normal(size=(count, 3))
     return direction / np.linalg.norm(direction, axis=1, keepdims=True)
@@ -488,6 +536,8 @@ def harmful_overlap(
     }
 
 
+=======
+>>>>>>> Stashed changes
 def non_adjacent_overlap(
     graph: BumperGraph,
     centers: np.ndarray,
@@ -499,12 +549,29 @@ def non_adjacent_overlap(
 ) -> list[tuple[str, str, float]]:
     """Bumper pairs that interpenetrate while being topologically far apart, worst first.
 
+<<<<<<< Updated upstream
     The original overlap metric, kept for comparison. It reports the fraction of one
     bumper's (interpolated-ball) samples lying strictly inside another bumper that shares
     no sphere with it and is more than ``walk_radius`` hops away. It fails every design
     ever measured -- 95.8% on the user's template -- because a sphere legitimately sits
     inside a slab two rows over, and because the samples are interior points to begin
     with. ``harmful_overlap`` is what ``validate`` uses.
+=======
+    The failure this looks for is the one the watchdog cannot absorb: two primitives that
+    overlap in space but belong to disjoint parts of the topology, so a node sliding from
+    one to the other finds no link to follow and falls back to a brute-force rescan.
+
+    Pairs that merely *neighbour* each other are excluded, and the exclusion has to be
+    generous or the check is all false positives. Bumpers built from a shared sphere
+    necessarily overlap -- a sphere lies inside every cone that ends on it, and a cone lies
+    inside every slab that carries it as a rim -- and that overlap is the collider being
+    seamless, not a fault. So a pair is reported only when it shares no sphere at all *and*
+    is more than ``walk_radius`` hops apart in the bumper graph.
+
+    The measure is the fraction of one bumper's surface samples lying strictly inside the
+    other: scale-free, so it reads the same for two fat torso spheres and two thin forearm
+    cones.
+>>>>>>> Stashed changes
     """
     generator = np.random.default_rng(seed)
     direction = generator.normal(size=(samples_per_bumper, 3))
@@ -541,12 +608,20 @@ def non_adjacent_overlap(
 
 
 def degenerate_primitives(
+<<<<<<< Updated upstream
     graph: BumperGraph,
     centers: np.ndarray,
     radii: np.ndarray,
     names: Sequence[str] | None = None,
 ) -> list[str]:
     """Bumpers that carry no surface of their own, or no flat face."""
+=======
+    graph: BumperGraph, centers: np.ndarray, radii: np.ndarray
+) -> list[str]:
+    """Bumpers that carry no surface of their own, or no flat face."""
+    from .bumpers import tangent_plane
+
+>>>>>>> Stashed changes
     problems: list[str] = []
 
     separation = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=2)
@@ -556,6 +631,7 @@ def degenerate_primitives(
                 continue
             if separation[first, second] + radii[first] <= radii[second] + 1e-9:
                 problems.append(
+<<<<<<< Updated upstream
                     f"sphere {sphere_label(first, names)} (r={radii[first] * 1000:.0f} mm) "
                     f"lies entirely inside sphere {sphere_label(second, names)} "
                     f"(r={radii[second] * 1000:.0f} mm): it can never be the nearest bumper"
@@ -564,12 +640,25 @@ def degenerate_primitives(
 
     for bumper_index, bumper in enumerate(graph.bumpers):
         label = bumper_label(graph, bumper_index, names)
+=======
+                    f"sphere {first} (r={radii[first] * 1000:.0f} mm) lies entirely inside "
+                    f"sphere {second} (r={radii[second] * 1000:.0f} mm): it can never be "
+                    "the nearest bumper"
+                )
+                break
+
+    for bumper in graph.bumpers:
+>>>>>>> Stashed changes
         if bumper.kind == CONE:
             first, second = bumper.spheres
             slack = separation[first, second] - abs(radii[first] - radii[second])
             if slack <= 1e-6:
                 problems.append(
+<<<<<<< Updated upstream
                     f"{label}: centres {separation[first, second] * 1000:.1f} mm apart but "
+=======
+                    f"{bumper}: centres {separation[first, second] * 1000:.1f} mm apart but "
+>>>>>>> Stashed changes
                     f"radii differ by {abs(radii[first] - radii[second]) * 1000:.1f} mm, so "
                     "the cone has no lateral surface"
                 )
@@ -578,21 +667,32 @@ def degenerate_primitives(
                 used = np.array(triangle)
                 _, _, _, exists = tangent_plane(centers[used][None], radii[used][None])
                 if not bool(exists[0]):
+<<<<<<< Updated upstream
                     triangle_label = ", ".join(sphere_label(s, names) for s in triangle)
                     problems.append(
                         f"{label}: triangle [{triangle_label}] admits no tangent plane -- "
                         "its centres are near-collinear or its radii vary faster than "
                         "their spacing, so the slab has no flat face"
+=======
+                    problems.append(
+                        f"{bumper}: triangle {triangle} admits no tangent plane -- its "
+                        "centres are near-collinear or its radii vary faster than their "
+                        "spacing, so the slab has no flat face"
+>>>>>>> Stashed changes
                     )
     return problems
 
 
+<<<<<<< Updated upstream
 def mirror_asymmetry(
     centers: np.ndarray,
     radii: np.ndarray,
     tolerance: float = 2e-3,
     names: Sequence[str] | None = None,
 ) -> list[str]:
+=======
+def mirror_asymmetry(centers: np.ndarray, radii: np.ndarray, tolerance: float = 2e-3) -> list[str]:
+>>>>>>> Stashed changes
     """Spheres with no mirror twin across x = 0."""
     mirrored = centers.copy()
     mirrored[:, 0] *= -1.0
@@ -602,13 +702,19 @@ def mirror_asymmetry(
         twin = int(np.argmin(distance))
         if distance[twin] > tolerance or abs(radii[twin] - radius) > tolerance:
             problems.append(
+<<<<<<< Updated upstream
                 f"sphere {sphere_label(index, names)} at {np.round(centers[index], 3).tolist()} "
                 f"has no twin (nearest mirror candidate {sphere_label(twin, names)}, off by "
+=======
+                f"sphere {index} at {np.round(centers[index], 3).tolist()} has no twin "
+                f"(nearest mirror candidate {twin}, off by "
+>>>>>>> Stashed changes
                 f"{distance[twin] * 1000:.1f} mm / {abs(radii[twin] - radius) * 1000:.1f} mm r)"
             )
     return problems
 
 
+<<<<<<< Updated upstream
 def joint_crossing_cones(
     graph: BumperGraph,
     parent_joints: np.ndarray,
@@ -720,6 +826,8 @@ def coverage_clusters(
     return clusters
 
 
+=======
+>>>>>>> Stashed changes
 # ------------------------------------------------------------------------------ driver
 
 
@@ -735,6 +843,7 @@ def validate(
     pose_vertex_stride: int = 3,
     walk_budget: int = 3,
     check_symmetry: bool = True,
+<<<<<<< Updated upstream
     names: Sequence[str] | None = None,
     expected_parent_joints: Sequence[int] | np.ndarray | None = None,
     min_cluster_vertices: int = 5,
@@ -745,11 +854,16 @@ def validate(
     ``expected_parent_joints`` (N,) is the joint the generator meant each sphere to bind
     to; when given, the tool's own binding rule is checked against it.
     """
+=======
+) -> Report:
+    """Run the whole suite. ``poses`` is (P, 72); pass None to skip the pose sweep."""
+>>>>>>> Stashed changes
     centers = np.ascontiguousarray(centers, dtype=np.float64)
     radii = np.ascontiguousarray(radii, dtype=np.float64)
     connections = [tuple(int(index) for index in c) for c in connections]
     limits = thresholds or Thresholds()
     body = body or load_body(gender)
+<<<<<<< Updated upstream
     names = None if names is None else [str(name) for name in names]
     if names is not None and len(names) != len(centers):
         raise ValueError(f"{len(names)} names for {len(centers)} spheres")
@@ -762,6 +876,11 @@ def validate(
     def label(index: int) -> str:
         return bumper_label(graph, index, names)
 
+=======
+    report = Report()
+
+    graph = BumperGraph(len(centers), connections)
+>>>>>>> Stashed changes
     counts = graph.counts()
     triangles = sum(1 for c in connections if len(c) == 3)
     quads = sum(1 for c in connections if len(c) == 4)
@@ -792,10 +911,14 @@ def validate(
         "graph/spheres-connected", len(sphere_components) == 1,
         f"{len(sphere_components)} component(s)"
         + ("" if len(sphere_components) == 1
+<<<<<<< Updated upstream
            else "; strays " + str([
                [sphere_label(s, names) for s in component]
                for component in sphere_components[1:]
            ][:4])),
+=======
+           else f"; strays {[c for c in sphere_components[1:]][:4]}"),
+>>>>>>> Stashed changes
         len(sphere_components), 1,
     )
     bumper_components = graph.components()
@@ -808,7 +931,11 @@ def validate(
         len(bumper_components), 1,
     )
 
+<<<<<<< Updated upstream
     degenerate = degenerate_primitives(graph, centers, radii, names)
+=======
+    degenerate = degenerate_primitives(graph, centers, radii)
+>>>>>>> Stashed changes
     report.add(
         "graph/no-degenerate-primitives", not degenerate,
         "none" if not degenerate
@@ -818,7 +945,11 @@ def validate(
     report.worst["degenerate"] = degenerate
 
     if check_symmetry:
+<<<<<<< Updated upstream
         asymmetric = mirror_asymmetry(centers, radii, names=names)
+=======
+        asymmetric = mirror_asymmetry(centers, radii)
+>>>>>>> Stashed changes
         report.add(
             "geometry/mirror-symmetric", not asymmetric,
             "every sphere has an x-mirror twin" if not asymmetric
@@ -898,6 +1029,7 @@ def validate(
         "bumpers_total": len(graph.bumpers),
     }
     report.worst["walk_breaks"] = sorted(
+<<<<<<< Updated upstream
         (
             {
                 "pair": [label(pair[0]), label(pair[1])],
@@ -906,6 +1038,9 @@ def validate(
             }
             for pair, count in tally.items()
         ),
+=======
+        ({"pair": list(pair), "edges": count} for pair, count in tally.items()),
+>>>>>>> Stashed changes
         key=lambda entry: -entry["edges"],
     )[:15]
     report.add(
@@ -953,14 +1088,22 @@ def validate(
         detour = hop[first, second]
         if 0 <= detour <= walk_budget:
             wasteful.append(bumper_index)
+<<<<<<< Updated upstream
     report.worst["dead_bumpers"] = [label(i) for i in dead]
     report.worst["dead_bumper_indices"] = list(dead)
+=======
+    report.worst["dead_bumpers"] = [str(graph.bumpers[i]) for i in dead]
+>>>>>>> Stashed changes
     report.add(
         "watchdog/no-wasteful-connections", not wasteful,
         ("every connection either owns surface or shortens the walk"
          if not wasteful
          else f"{len(wasteful)} connection(s) own no surface and are not load-bearing: "
+<<<<<<< Updated upstream
               + ", ".join(label(i) for i in wasteful[:6]))
+=======
+              + ", ".join(str(graph.bumpers[i]) for i in wasteful[:6]))
+>>>>>>> Stashed changes
         + f" ({len(dead_connections) - len(wasteful)} more own nothing but keep the walk "
           f"short; {len(dead) - len(dead_connections)} spheres are buried inside their own "
           "cones, which is expected along a chain)",
@@ -989,6 +1132,7 @@ def validate(
         })
     report.stats["by_region"] = sorted(by_region, key=lambda entry: -entry["rms_mm"])
 
+<<<<<<< Updated upstream
     # And the same question at the resolution of a patch rather than a joint: which
     # connected pieces of skin are badly covered, where they are, and which way they face.
     normals = body.normals[modelled]
@@ -1106,10 +1250,31 @@ def validate(
                for entry in unrelated[:5]
            ) + ("" if len(unrelated) <= 5 else "; ...")),
         len(unrelated), 0,
+=======
+    overlaps = non_adjacent_overlap(graph, centers, radii)
+    worst_overlap = overlaps[0][2] if overlaps else 0.0
+    report.worst["non_adjacent_overlap"] = [
+        {"a": a, "b": b, "fraction": round(f, 4)} for a, b, f in overlaps[:15]
+    ]
+    report.add(
+        "watchdog/non-adjacent-overlap", worst_overlap <= limits.max_non_adjacent_overlap,
+        f"worst unlinked interpenetration {worst_overlap * 100:.1f}%"
+        + ("" if not overlaps
+           else f" ({overlaps[0][0]} into {overlaps[0][1]}); "
+                f"{len(overlaps)} unlinked pairs touch at all"),
+        worst_overlap, limits.max_non_adjacent_overlap,
+>>>>>>> Stashed changes
     )
 
     # -------------------------------------------------------------------- the pose sweep
     if poses is not None and len(poses):
+<<<<<<< Updated upstream
+=======
+        parent_joints, _, _ = assign_parent_joint_like_tool(centers, body.joints, body.parents)
+        report.stats["binding"] = {
+            "joints_used": sorted(set(int(j) for j in parent_joints)),
+        }
+>>>>>>> Stashed changes
         sampled = np.flatnonzero(modelled)[::pose_vertex_stride]
         per_pose = []
         for pose_index, theta in enumerate(poses):
@@ -1158,6 +1323,7 @@ def validate(
             worst_fraction, limits.posed_max_protrusion_fraction,
         )
     return report
+<<<<<<< Updated upstream
 
 
 # ------------------------------------------------------------------------ formatting
@@ -1290,3 +1456,5 @@ def format_report(report: Report, *, names: Sequence[str] | None = None) -> str:
                 f"gap {entry['max_gap'] * 1000:6.1f} mm"
             )
     return "\n".join(lines)
+=======
+>>>>>>> Stashed changes

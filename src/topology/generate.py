@@ -170,7 +170,10 @@ def chain(
     connect: bool = True,
     half_thickness: float | None = None,
     min_vertices: int = 12,
+<<<<<<< Updated upstream
     method: str | None = None,
+=======
+>>>>>>> Stashed changes
 ) -> tuple[list[SphereSpec], list[tuple[str, str]]]:
     """Spheres along a bone at the given parameters, with the cones between them.
 
@@ -179,10 +182,16 @@ def chain(
     shoulder joint. Set ``on_axis`` to place on the bone axis instead of the section's
     medial point, which is only right for a limb whose cross-section is centred on its bone.
     """
+<<<<<<< Updated upstream
     section_options = {} if method is None else {"method": method}
     stations = bone_stations(
         body, parent, child, parameters=parameters, vertex_mask=vertex_mask,
         half_thickness=half_thickness, min_vertices=min_vertices, **section_options,
+=======
+    stations = bone_stations(
+        body, parent, child, parameters=parameters, vertex_mask=vertex_mask,
+        half_thickness=half_thickness, min_vertices=min_vertices,
+>>>>>>> Stashed changes
     )
     if len(stations) != len(parameters):
         found = {round(station.parameter, 4) for station in stations}
@@ -219,7 +228,10 @@ def sheet(
     vertex_mask: np.ndarray | None = None,
     radius_scale: float = 1.0,
     half_thickness: float = 0.018,
+<<<<<<< Updated upstream
     method: str | None = None,
+=======
+>>>>>>> Stashed changes
 ) -> tuple[list[SphereSpec], dict[tuple[int, int], str]]:
     """A grid of spheres on the trunk's medial locus.
 
@@ -245,12 +257,19 @@ def sheet(
     grid: dict[tuple[int, int], str] = {}
     diagnostics: list[dict] = []
 
+<<<<<<< Updated upstream
     section_options = {} if method is None else {"method": method}
+=======
+>>>>>>> Stashed changes
     for row, height in enumerate(heights):
         section = section_at(
             body, np.array([0.0, float(height), 0.0]), up,
             half_thickness=half_thickness, vertex_mask=vertex_mask,
+<<<<<<< Updated upstream
             reference_up=np.array([1.0, 0.0, 0.0]), symmetrize=True, **section_options,
+=======
+            reference_up=np.array([1.0, 0.0, 0.0]), symmetrize=True,
+>>>>>>> Stashed changes
         )
         if len(section.planar) < 12:
             raise ValueError(f"sheet {name}: too few vertices in the cut at y={height}")

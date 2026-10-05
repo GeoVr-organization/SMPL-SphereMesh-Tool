@@ -7,10 +7,12 @@ SphereConnection: connectors + Spheremesh / Trispheremesh actors.
 """
 from __future__ import annotations
 
+import colorsys
 import csv
 import glob
 import json
 import os
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -675,6 +677,33 @@ class SphereManager:
             s.set_highlighted(i in highlighted)
         if self.lock_button_callback and si is not None:
             self._call_lock_button_callback()
+
+    @staticmethod
+    def _random_vivid_color():
+        """Random, well-saturated RGB color that stays readable against the model."""
+        hue = random.random()
+        saturation = random.uniform(0.55, 0.95)
+        value = random.uniform(0.65, 1.0)
+        red, green, blue = colorsys.hsv_to_rgb(hue, saturation, value)
+        return (red, green, blue)
+
+    def randomize_colors(self):
+        """Give every sphere, cone (2-sphere) and plane (3-sphere) its own random color."""
+        for sphere in self.spheres:
+            sphere.set_random_color(self._random_vivid_color())
+        for connection in self.connections:
+            connection.set_random_color(self._random_vivid_color())
+        # Selection/lock colors take precedence, so re-apply them on top.
+        self._highlight_selection()
+        return len(self.spheres) + len(self.connections)
+
+    def reset_colors(self):
+        """Drop random color overrides and restore the default sphere/connection colors."""
+        for sphere in self.spheres:
+            sphere.set_random_color(None)
+        for connection in self.connections:
+            connection.set_random_color(None)
+        self._highlight_selection()
 
     def toggle_spheremeshes(self, state):
         self.spheremesh_visible = bool(state)

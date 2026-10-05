@@ -35,6 +35,8 @@ class ManagedSphere:
         self._selected_color = selected_color
         self._locked_color = locked_color
         self._locked_selected_color = locked_selected_color
+        # Optional per-sphere override replacing the normal color (random coloring).
+        self._random_color = None
 
         def _cb(pos):
             interaction_callback(np.array(pos, dtype=np.float64))
@@ -57,13 +59,25 @@ class ManagedSphere:
         self._highlighted = bool(highlighted)
         self.apply_widget_color()
 
+    def set_random_color(self, color):
+        """Override the normal (unselected, unlocked) color; None restores the default."""
+        self._random_color = color
+        self.apply_widget_color()
+
+    def get_random_color(self):
+        return self._random_color
+
     def apply_widget_color(self):
         if self.widget is None:
             return
         if self._highlighted:
             color = self._locked_selected_color if self.locked else self._selected_color
+        elif self.locked:
+            color = self._locked_color
+        elif self._random_color is not None:
+            color = self._random_color
         else:
-            color = self._locked_color if self.locked else self._normal_color
+            color = self._normal_color
         self.widget.GetSphereProperty().SetColor(pv.Color(color).float_rgb)
         self.widget.GetSphereProperty().SetOpacity(self._opacity)
 

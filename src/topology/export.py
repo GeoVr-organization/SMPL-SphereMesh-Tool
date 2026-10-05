@@ -24,7 +24,11 @@ survives a round trip through the GUI unchanged.
 from __future__ import annotations
 
 import json
+<<<<<<< Updated upstream
 from decimal import ROUND_DOWN, Decimal
+=======
+import math
+>>>>>>> Stashed changes
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -38,7 +42,10 @@ __all__ = [
     "write_tool_json",
     "write_engine_text",
     "split_quads",
+<<<<<<< Updated upstream
     "merge_quads",
+=======
+>>>>>>> Stashed changes
 ]
 
 # Keep in sync with src/sphere_manager.py JSON_VERSION.
@@ -65,6 +72,7 @@ def split_quads(connections: Iterable[Sequence[int]]) -> tuple[list[tuple[int, .
     return tool_connections, quads
 
 
+<<<<<<< Updated upstream
 def merge_quads(
     connections: Iterable[Sequence[int]], quad_groups: Iterable[Sequence[int]]
 ) -> list[tuple[int, ...]]:
@@ -109,6 +117,8 @@ def merge_quads(
     return merged
 
 
+=======
+>>>>>>> Stashed changes
 def compute_bindings(body: Body, centers: np.ndarray, radii: np.ndarray) -> list[dict]:
     """Per-sphere LBS binding and radius scaling, exactly as the tool computes them.
 
@@ -202,6 +212,7 @@ def write_tool_json(path, payload: dict) -> Path:
 
 
 def _truncate(value: float, decimals: int = 4) -> float:
+<<<<<<< Updated upstream
     """Truncate, not round -- matching ``scripts/json2txt.py`` exactly.
 
     Done on the shortest round-trip decimal representation rather than through
@@ -213,6 +224,11 @@ def _truncate(value: float, decimals: int = 4) -> float:
     truncated = Decimal(repr(float(value))).quantize(quantum, rounding=ROUND_DOWN)
     # ``+ 0.0`` turns a truncated ``-0.0000`` into ``0.0`` so the sign never prints.
     return float(truncated) + 0.0
+=======
+    """Truncate, not round -- matching ``scripts/json2txt.py``."""
+    factor = 10 ** decimals
+    return math.trunc(value * factor) / factor
+>>>>>>> Stashed changes
 
 
 def write_engine_text(

@@ -37,6 +37,8 @@ class SphereConnection:
         self._selected_color = selected_color
         self._locked_color = locked_color
         self._locked_selected_color = locked_selected_color
+        # Optional per-connection override replacing the normal color (random coloring).
+        self._random_color = None
 
         self._connector_actor = None
         self._actors = []
@@ -83,25 +85,46 @@ class SphereConnection:
             line = pv.Line(c0, c1)
             tube = line.tube(radius=0.005)
             self._connector_actor = self._plotter.add_mesh(
-                tube, color="gray", opacity=self._opacity, smooth_shading=True
+                tube,
+                color=self._current_connector_color(),
+                opacity=self._opacity,
+                smooth_shading=True,
             )
         else:
             c2 = S[2].get_center()
             prismoid = self._build_tri_prismoid_mesh(c0, c1, c2, half_thickness=0.0025)
             if prismoid is not None:
                 self._connector_actor = self._plotter.add_mesh(
-                    prismoid, color="gray", opacity=self._opacity, smooth_shading=True
+                    prismoid,
+                    color=self._current_connector_color(),
+                    opacity=self._opacity,
+                    smooth_shading=True,
                 )
 
     def set_connector_visibility(self, visible):
         if self._connector_actor is not None:
             self._connector_actor.SetVisibility(1 if visible else 0)
 
+    def set_random_color(self, color):
+        """Override the normal (unselected, unlocked) color; None restores the default."""
+        self._random_color = color
+        self.refresh_style()
+
+    def get_random_color(self):
+        return self._random_color
+
     def _current_mesh_color(self):
         s0 = self._spheres()[0]
         if self._selected:
             return self._locked_selected_color if s0.locked else self._selected_color
-        return self._locked_color if s0.locked else self._normal_color
+        if s0.locked:
+            return self._locked_color
+        if self._random_color is not None:
+            return self._random_color
+        return self._normal_color
+
+    def _current_connector_color(self):
+        return self._random_color if self._random_color is not None else "gray"
 
     def _set_actor_mesh(self, actor, mesh, color, smooth_shading=True):
         mapper = actor.GetMapper()
@@ -222,6 +245,9 @@ class SphereConnection:
         color_rgb = pv.Color(color).float_rgb
         for a in self._actors:
             a.GetProperty().SetColor(color_rgb)
+        if self._connector_actor is not None:
+            connector_rgb = pv.Color(self._current_connector_color()).float_rgb
+            self._connector_actor.GetProperty().SetColor(connector_rgb)
 
     def delete(self):
         if self._connector_actor is not None:

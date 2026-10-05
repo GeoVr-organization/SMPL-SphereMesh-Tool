@@ -1779,6 +1779,27 @@ class MainWindow(QMainWindow):
         self.reassign_parents_button.clicked.connect(self.reassign_all_parent_joints_clicked)
         self.ui_layout.addWidget(self.reassign_parents_button)
 
+        self.random_colors_button = QPushButton("Random Colors")
+        self.random_colors_button.setToolTip(
+            "Give every sphere, cone and plane of the spheremesh its own random color. "
+            "Click again for a new set of colors."
+        )
+        self.random_colors_button.setStyleSheet("""
+            QPushButton { background-color: #e67e22; color: white; border: none; border-radius: 4px;
+                font-weight: bold; padding: 6px; }
+            QPushButton:hover { background-color: #d35400; }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
+        """)
+        self.random_colors_button.clicked.connect(self.randomize_colors_clicked)
+        self.ui_layout.addWidget(self.random_colors_button)
+
+        self.reset_colors_button = QPushButton("Reset Colors")
+        self.reset_colors_button.setToolTip(
+            "Restore the default sphere and spheremesh colors."
+        )
+        self.reset_colors_button.clicked.connect(self.reset_colors_clicked)
+        self.ui_layout.addWidget(self.reset_colors_button)
+
         self.check_symmetry_button = QPushButton("Check X Symmetry")
         self.check_symmetry_button.setToolTip(
             "Validate mirrored sphere pairs across X axis (center, radius, and mirrored connections)."
@@ -2892,6 +2913,20 @@ class MainWindow(QMainWindow):
         self.info_panel.update_selected_info()
         self.plotter.render()
 
+    def randomize_colors_clicked(self):
+        """Toolbar: assign a random color to every sphere, cone and plane."""
+        if not self.sphere_manager:
+            return
+        self.sphere_manager.randomize_colors()
+        self.plotter.render()
+
+    def reset_colors_clicked(self):
+        """Toolbar: restore the default sphere/spheremesh colors."""
+        if not self.sphere_manager:
+            return
+        self.sphere_manager.reset_colors()
+        self.plotter.render()
+
     def check_x_symmetry_clicked(self):
         """Validate sphere/connectivity symmetry across X axis and show a report."""
         if not self.sphere_manager:
@@ -3269,8 +3304,8 @@ class MainWindow(QMainWindow):
 
             # Cut off top percentile: 95 = top 5% use "above range" (gray) color
             percentile_cutoff =55.0
-            vmin = float(np.min(heat))
-            vmax = float(np.percentile(heat, percentile_cutoff))
+            vmin = -0.02
+            vmax = 0.02
 
        
 

@@ -49,16 +49,22 @@ __all__ = [
     "vertex_normals",
     "dominant_joint",
     "joint_region_mask",
+<<<<<<< Updated upstream
     "plane_frame",
+=======
+>>>>>>> Stashed changes
     "section_at",
     "bone_stations",
     "trunk_slices",
     "inscribed_radius",
     "assign_parent_joint_like_tool",
     "pose_spheres_like_tool",
+<<<<<<< Updated upstream
     "TRUNK_JOINTS",
     "kintree_distance",
     "joints_compatible",
+=======
+>>>>>>> Stashed changes
     "random_poses",
     "mocap_poses",
 ]
@@ -93,6 +99,7 @@ class Body:
             object.__setattr__(self, "_normals", cached)
         return cached
 
+<<<<<<< Updated upstream
     @property
     def vertex_tree(self):
         """A ``scipy.spatial.cKDTree`` over the vertices, built once per body."""
@@ -104,6 +111,8 @@ class Body:
             object.__setattr__(self, "_vertex_tree", cached)
         return cached
 
+=======
+>>>>>>> Stashed changes
     def bone(self, parent: str | int, child: str | int) -> tuple[np.ndarray, np.ndarray, float]:
         """(origin, unit axis, length) of the bone from ``parent`` to ``child``."""
         start = self.joints[_joint(parent)]
@@ -364,13 +373,21 @@ def inscribed_radius(body: Body, centers: np.ndarray) -> np.ndarray:
     uses, so a template generated here and one grown in the tool agree.
     """
     centers = np.atleast_2d(np.asarray(centers, dtype=np.float64))
+<<<<<<< Updated upstream
     distances, _ = body.vertex_tree.query(centers)
     return np.asarray(distances, dtype=np.float64).reshape(len(centers))
+=======
+    radius = np.empty(len(centers))
+    for index, center in enumerate(centers):
+        radius[index] = np.min(np.linalg.norm(body.vertices - center, axis=1))
+    return radius
+>>>>>>> Stashed changes
 
 
 # ---------------------------------------------------------------------- sections
 
 
+<<<<<<< Updated upstream
 def plane_frame(
     axis: np.ndarray, reference_up: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -394,6 +411,8 @@ def plane_frame(
     return axis, first_axis, second_axis
 
 
+=======
+>>>>>>> Stashed changes
 def section_at(
     body: Body,
     origin: np.ndarray,
@@ -403,6 +422,7 @@ def section_at(
     vertex_mask: np.ndarray | None = None,
     reference_up: np.ndarray | None = None,
     symmetrize: bool = False,
+<<<<<<< Updated upstream
     method: str = "band",
     min_points: int = 12,
 ) -> Section:
@@ -413,11 +433,16 @@ def section_at(
     ``method="cut"`` intersects the mesh with the plane (``sections.plane_cut``) and keeps
     the loop that ``vertex_mask`` prefers and that contains ``origin``; ``half_thickness``
     is then unused.
+=======
+) -> Section:
+    """Vertices within ``half_thickness`` of the plane through ``origin`` normal to ``axis``.
+>>>>>>> Stashed changes
 
     The in-plane frame is chosen deterministically so that repeated calls along a bone give
     comparable coordinates: the first in-plane axis is ``reference_up`` (world +X by
     default) projected into the plane.
     """
+<<<<<<< Updated upstream
     if method == "cut":
         section = _cut_section(
             body, origin, axis, vertex_mask=vertex_mask, reference_up=reference_up,
@@ -432,6 +457,18 @@ def section_at(
     if method != "band":
         raise ValueError(f"section_at: method must be 'band' or 'cut', not {method!r}")
     axis, first_axis, second_axis = plane_frame(axis, reference_up)
+=======
+    axis = np.asarray(axis, dtype=np.float64)
+    axis = axis / np.linalg.norm(axis)
+    reference = np.array([1.0, 0.0, 0.0]) if reference_up is None else np.asarray(
+        reference_up, dtype=np.float64
+    )
+    if abs(float(reference @ axis)) > 0.95:
+        reference = np.array([0.0, 1.0, 0.0])
+    first_axis = reference - float(reference @ axis) * axis
+    first_axis /= np.linalg.norm(first_axis)
+    second_axis = np.cross(axis, first_axis)
+>>>>>>> Stashed changes
 
     candidates = (
         np.arange(len(body.vertices)) if vertex_mask is None
@@ -465,6 +502,7 @@ def section_at(
     )
 
 
+<<<<<<< Updated upstream
 def _cut_section(
     body: Body,
     origin: np.ndarray,
@@ -517,6 +555,8 @@ def _cut_section(
     return loop_section(loop, origin, axis, reference_up=reference_up, symmetrize=symmetrize)
 
 
+=======
+>>>>>>> Stashed changes
 def bone_stations(
     body: Body,
     parent: str | int,
@@ -526,7 +566,10 @@ def bone_stations(
     vertex_mask: np.ndarray | None = None,
     half_thickness: float | None = None,
     min_vertices: int = 12,
+<<<<<<< Updated upstream
     method: str = "band",
+=======
+>>>>>>> Stashed changes
 ) -> list[Station]:
     """Cross-sections along a bone, reduced to a medial point and a radius each.
 
@@ -538,9 +581,12 @@ def bone_stations(
     not the point where the bone axis crosses it. On a thigh those differ by well over a
     centimetre, and a chain of spheres on the bone axis inherits that error as a systematic
     protrusion on one side and a gap on the other.
+<<<<<<< Updated upstream
 
     ``method`` is passed to ``section_at``; with ``"cut"`` the ``min_vertices`` floor
     applies to the cut loop's point count.
+=======
+>>>>>>> Stashed changes
     """
     origin, axis, length = body.bone(parent, child)
     if parameters is None:
@@ -553,7 +599,11 @@ def bone_stations(
         axis_point = origin + float(parameter) * length * axis
         section = section_at(
             body, axis_point, axis,
+<<<<<<< Updated upstream
             half_thickness=half_thickness, vertex_mask=vertex_mask, method=method,
+=======
+            half_thickness=half_thickness, vertex_mask=vertex_mask,
+>>>>>>> Stashed changes
         )
         if len(section.planar) < min_vertices:
             continue
@@ -582,7 +632,10 @@ def trunk_slices(
     *,
     vertex_mask: np.ndarray | None = None,
     half_thickness: float = 0.018,
+<<<<<<< Updated upstream
     method: str = "band",
+=======
+>>>>>>> Stashed changes
 ) -> list[tuple[float, Section, np.ndarray, np.ndarray]]:
     """Horizontal cuts through the trunk with their medial locus.
 
@@ -598,7 +651,11 @@ def trunk_slices(
         section = section_at(
             body, origin, up,
             half_thickness=half_thickness, vertex_mask=vertex_mask,
+<<<<<<< Updated upstream
             reference_up=np.array([1.0, 0.0, 0.0]), method=method,
+=======
+            reference_up=np.array([1.0, 0.0, 0.0]),
+>>>>>>> Stashed changes
         )
         if len(section.planar) < 12:
             continue
@@ -612,6 +669,7 @@ def trunk_slices(
 # --------------------------------------------------------------- tool-compatible LBS
 
 
+<<<<<<< Updated upstream
 #: Joints of the trunk. The spine joints are nearly dead (no vertex weights spine1 above
 #: 0.73), the collars barely rotate, and the skin between them blends smoothly, so a cone
 #: spanning two of them within two kintree steps behaves like one inside a bone. A limb
@@ -652,6 +710,8 @@ def joints_compatible(first_joint: int, second_joint: int, parents: np.ndarray) 
     return distance == 2 and first_joint in TRUNK_JOINTS and second_joint in TRUNK_JOINTS
 
 
+=======
+>>>>>>> Stashed changes
 def assign_parent_joint_like_tool(
     centers: np.ndarray, rest_joints: np.ndarray, parents: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
