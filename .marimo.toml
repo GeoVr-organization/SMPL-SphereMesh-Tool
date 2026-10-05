@@ -1,0 +1,9 @@
+[runtime]
+# Re-run cells automatically when an imported local module (SphereMesh.py, ...)
+# changes on disk, instead of needing a kernel restart.
+#   "off"     - no module reloading (marimo's default)
+#   "lazy"    - mark the affected cells stale, you click to re-run
+#   "autorun" - re-run the affected cells immediately
+auto_reload = "autorun"
+# Largest cell output marimo will render (default 8 MB).
+output_max_bytes = 50_000_000

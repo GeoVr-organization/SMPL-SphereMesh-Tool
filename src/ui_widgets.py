@@ -51,6 +51,11 @@ BETA_SLIDER_INT_MAX = 20
 
 SPHEREMESH_TXT_TITLE = "Sphere Mesh 2.0"
 
+# A left press and release closer than this (pixels) is a click, not a camera drag.
+CONNECTION_CLICK_MAX_MOVEMENT_PIXELS = 5
+# vtkCellPicker tolerance as a fraction of the window diagonal; connector tubes are thin.
+CONNECTION_PICK_TOLERANCE = 0.005
+
 _RANDOM_POSE_CSV = data_file("random_pose.csv")
 
 
@@ -879,9 +884,9 @@ class InfoPanel(QGroupBox):
         self.selected_sphere_label.setStyleSheet("font-size: 10pt;")
         info_layout.addWidget(self.spheremesh_id_label)
         info_layout.addWidget(self.selected_sphere_label)
-        conn_hdr = QLabel("Connections:")
-        conn_hdr.setStyleSheet("font-size: 9pt; color: #555555;")
-        info_layout.addWidget(conn_hdr)
+        self.connections_header_label = QLabel("Connections:")
+        self.connections_header_label.setStyleSheet("font-size: 9pt; color: #555555;")
+        info_layout.addWidget(self.connections_header_label)
         self.connections_text = QPlainTextEdit()
         self.connections_text.setReadOnly(True)
         self.connections_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
@@ -1338,6 +1343,16 @@ class InfoPanel(QGroupBox):
             return
 
         data = self.sphere_manager.get_selected_sphere_display_data()
+        if data is not None and data.get("connection") is not None:
+            self._show_connection_info(data)
+            self.adjustSize()
+            return
+
+        # A sphere or nothing is selected: undo what _show_connection_info changes.
+        self.sphere1_box.setTitle("Selected sphere")
+        self.selected_sphere_label.setVisible(True)
+        self.connections_header_label.setVisible(True)
+        self.connections_text.setVisible(True)
         if data is not None:
             gidx = data["sphere_index"]
             self.spheremesh_id_label.setText(f"Sphere #{gidx}")
@@ -1407,6 +1422,47 @@ class InfoPanel(QGroupBox):
             self.sphere3_to_joint_btn.setEnabled(False)
 
         self.adjustSize()
+
+    def _show_connection_info(self, data):
+        """A cone/triangle is selected: name it and give each of its spheres its own box."""
+        endpoint_indices = data["endpoint_indices"]
+        num_slots = data["num_slots"]
+        kind = "Cone" if num_slots == 2 else "Triangle"
+        self.spheremesh_id_label.setText(f"{kind} ({', '.join(str(i) for i in endpoint_indices)})")
+        self.selected_sphere_label.setVisible(False)
+        self.connections_header_label.setVisible(False)
+        self.connections_text.setVisible(False)
+
+        sphere_boxes = (self.sphere1_box, self.sphere2_box, self.sphere3_box)
+        center_spinboxes = (
+            (self.sphere1_center_x, self.sphere1_center_y, self.sphere1_center_z),
+            (self.sphere2_center_x, self.sphere2_center_y, self.sphere2_center_z),
+            (self.sphere3_center_x, self.sphere3_center_y, self.sphere3_center_z),
+        )
+        radius_spinboxes = (self.sphere1_radius, self.sphere2_radius, self.sphere3_radius)
+        grow_buttons = (self.sphere1_grow_button, self.sphere2_grow_button, self.sphere3_grow_button)
+        to_joint_buttons = (self.sphere1_to_joint_btn, self.sphere2_to_joint_btn, self.sphere3_to_joint_btn)
+
+        self._block_center_signals = True
+        self._block_radius_signals = True
+        for slot, sphere_box in enumerate(sphere_boxes):
+            slot_in_use = slot < num_slots
+            sphere_box.setVisible(slot_in_use)
+            radius_spinboxes[slot].setEnabled(slot_in_use)
+            grow_buttons[slot].setEnabled(slot_in_use)
+            to_joint_buttons[slot].setEnabled(slot_in_use)
+            if not slot_in_use:
+                continue
+            sphere_box.setTitle(f"Sphere #{endpoint_indices[slot]}")
+            for center_spinbox, coordinate in zip(center_spinboxes[slot], data["centers"][slot]):
+                center_spinbox.setValue(coordinate)
+            radius_spinboxes[slot].setValue(data["radii"][slot])
+        self._block_center_signals = False
+        self._block_radius_signals = False
+
+        # Delete acts on a selected sphere; connections are removed with Remove Connection.
+        self.delete_button.setEnabled(False)
+        self.update_lock_buttons(data["locked_per_sphere"], num_slots)
 
     def _on_radius_spinbox_changed(self, sphere_index, value):
         """Apply numeric radius change to the selected group's sphere."""
@@ -1758,6 +1814,17 @@ class MainWindow(QMainWindow):
         self.remove_connection_button.clicked.connect(self.remove_connection_clicked)
         self.ui_layout.addWidget(self.remove_connection_button)
 
+        self.divide_connection_button = QPushButton("Divide (D)")
+        self.divide_connection_button.setToolTip(
+            "Split the selected cone at its midpoint, or the selected triangle at its centroid, "
+            "with a new sphere of the mean radius. Triangles sharing a divided cone's edge are "
+            "split too.\nClick a cone or triangle in the 3D view to select it; Ctrl+click "
+            "reaches the ones hidden behind spheres."
+        )
+        self.divide_connection_button.clicked.connect(self.divide_connection_clicked)
+        self.divide_connection_button.setEnabled(False)
+        self.ui_layout.addWidget(self.divide_connection_button)
+
         self.selected_to_joint_button = QPushButton("Selected → closest joint")
         self.selected_to_joint_button.setToolTip(
             "Move the currently selected sphere to the nearest SMPL joint (same pose as the body)"
@@ -1792,6 +1859,22 @@ class MainWindow(QMainWindow):
         """)
         self.random_colors_button.clicked.connect(self.randomize_colors_clicked)
         self.ui_layout.addWidget(self.random_colors_button)
+
+        self.class_colors_button = QPushButton("Class Colors")
+        self.class_colors_button.setToolTip(
+            "Color the spheremesh by primitive: spheres red, capsuloids (cones) blue, "
+            "prysmoids (triangles) violet. Turn on \"Show Spheremeshes\" to see the full shapes."
+        )
+        self.class_colors_button.setStyleSheet("""
+            QPushButton { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ec191b, stop:0.5 #357db9, stop:1 #9449d1);
+                color: white; border: none; border-radius: 4px; font-weight: bold; padding: 6px; }
+            QPushButton:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #c41416, stop:0.5 #2b6699, stop:1 #7a3ab0); }
+            QPushButton:disabled { background-color: #cccccc; color: #888888; }
+        """)
+        self.class_colors_button.clicked.connect(self.class_colors_clicked)
+        self.ui_layout.addWidget(self.class_colors_button)
 
         self.reset_colors_button = QPushButton("Reset Colors")
         self.reset_colors_button.setToolTip(
@@ -1948,6 +2031,7 @@ class MainWindow(QMainWindow):
         def _on_sphere_manager_ui_refresh():
             self.info_panel.update_selected_info()
             self._sync_selected_to_joint_toolbar()
+            self._sync_divide_controls()
 
         # Initialize sphere manager with callback
         self.sphere_manager = SphereManager(self.plotter, _on_sphere_manager_ui_refresh)
@@ -2022,6 +2106,13 @@ class MainWindow(QMainWindow):
             sc.setContext(Qt.ShortcutContext.ApplicationShortcut)
             sc.setAutoRepeat(False)
             sc.activated.connect(lambda a=axis_name: self._on_camera_axis_shortcut(a))
+
+        divide_shortcut = QShortcut(QKeySequence("D"), self)
+        divide_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        divide_shortcut.setAutoRepeat(False)
+        divide_shortcut.activated.connect(self.divide_connection_clicked)
+
+        self._install_connection_picking()
 
     def _scene_focal_center_and_span(self):
         """Center and max extent of scene for camera positioning."""
@@ -2901,8 +2992,8 @@ class MainWindow(QMainWindow):
         if not self.sphere_manager:
             return
         data = self.sphere_manager.get_selected_sphere_display_data()
-        if not data:
-            return
+        if not data or data["selected_local_index"] is None:
+            return  # nothing, or a cone/triangle, is selected
         self._move_sphere_to_closest_joint(data["selected_local_index"])
 
     def reassign_all_parent_joints_clicked(self):
@@ -2918,6 +3009,13 @@ class MainWindow(QMainWindow):
         if not self.sphere_manager:
             return
         self.sphere_manager.randomize_colors()
+        self.plotter.render()
+
+    def class_colors_clicked(self):
+        """Toolbar: spheres red, capsuloids blue, prysmoids violet."""
+        if not self.sphere_manager:
+            return
+        self.sphere_manager.apply_class_colors()
         self.plotter.render()
 
     def reset_colors_clicked(self):
@@ -3120,6 +3218,134 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Remove Connection", "Could not remove selected connection.")
             return
         self.info_panel.update_selected_info()
+        self.plotter.render()
+
+    def _sync_divide_controls(self):
+        """Enable Divide only while a cone/triangle is selected (the InfoPanel shows which)."""
+        if not hasattr(self, "divide_connection_button"):
+            return
+        has_selected_connection = (
+            self.sphere_manager is not None
+            and self.sphere_manager.get_selected_connection() is not None
+        )
+        self.divide_connection_button.setEnabled(has_selected_connection)
+
+    def divide_connection_clicked(self):
+        """Toolbar/D: split the picked cone or triangle with a new sphere."""
+        if not self.sphere_manager:
+            return
+        selected_connection = self.sphere_manager.get_selected_connection()
+        if selected_connection is None:
+            return
+        body_mesh = None
+        if getattr(self, "mesh_actor", None) is not None:
+            body_mesh_vtk = self.mesh_actor.GetMapper().GetInput()
+            if body_mesh_vtk is not None:
+                body_mesh = pv.wrap(body_mesh_vtk)
+        description = self.sphere_manager.describe_connection(selected_connection)
+        new_index = self.sphere_manager.divide_connection(selected_connection, body_mesh)
+        if new_index is None:
+            self._report(
+                "Divide",
+                f"Could not divide {description}: a new piece would be degenerate. "
+                "Nothing was changed.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+        if self._clip_planes_vtk:
+            self._apply_clip_planes_to_all_actors()
+        self.info_panel.update_selected_info()
+        self.plotter.render()
+
+    # --- Connection picking -------------------------------------------------
+    # Sphere widgets claim (abort) every left press that lands on their sphere, at
+    # priority 0.5. A press observer below them therefore only sees presses on empty
+    # space or connections. Ctrl+click pauses the widgets for one click so it can reach
+    # cones and triangles hidden behind spheres.
+
+    def _install_connection_picking(self):
+        """Select a cone/triangle with a left click (no drag) in the 3D view."""
+        self._connection_click_press_position = None
+        self._suspended_sphere_widget_renderers = []
+        if self.plotter.iren is None:
+            return
+        self._connection_picker = vtk.vtkCellPicker()
+        self._connection_picker.SetTolerance(CONNECTION_PICK_TOLERANCE)
+        self._connection_picker.PickFromListOn()
+        render_window_interactor = self.plotter.iren.interactor
+        render_window_interactor.AddObserver(
+            "LeftButtonPressEvent", self._on_left_press_before_widgets, 1.0
+        )
+        render_window_interactor.AddObserver(
+            "LeftButtonPressEvent", self._on_left_press_unclaimed, -1.0
+        )
+        # The interactor style grabs focus on press, so the release only reaches an
+        # observer registered on the style; pyvista's add_observer does exactly that.
+        self.plotter.iren.add_observer(
+            "LeftButtonReleaseEvent", self._on_left_release_after_unclaimed_press
+        )
+
+    def _suspend_sphere_widgets(self):
+        """Stop the sphere widgets from claiming clicks; they keep rendering."""
+        self._restore_sphere_widgets()
+        for sphere in self.sphere_manager.spheres if self.sphere_manager else []:
+            sphere_widget = sphere.widget
+            if sphere_widget is None or not sphere_widget.GetEnabled():
+                continue
+            self._suspended_sphere_widget_renderers.append(
+                (sphere_widget, sphere_widget.GetCurrentRenderer())
+            )
+            sphere_widget.SetCurrentRenderer(None)
+
+    def _restore_sphere_widgets(self):
+        for sphere_widget, sphere_widget_renderer in self._suspended_sphere_widget_renderers:
+            sphere_widget.SetCurrentRenderer(sphere_widget_renderer)
+        self._suspended_sphere_widget_renderers = []
+
+    def _on_left_press_before_widgets(self, render_window_interactor, _event):
+        # Also recovers from a release that never arrived (e.g. focus lost mid-click).
+        self._restore_sphere_widgets()
+        self._connection_click_press_position = None
+        if render_window_interactor.GetControlKey():
+            self._suspend_sphere_widgets()
+
+    def _on_left_press_unclaimed(self, render_window_interactor, _event):
+        self._connection_click_press_position = render_window_interactor.GetEventPosition()
+
+    def _on_left_release_after_unclaimed_press(self, _interactor_style, _event):
+        self._restore_sphere_widgets()
+        press_position = self._connection_click_press_position
+        self._connection_click_press_position = None
+        if press_position is None or self.sphere_manager is None:
+            return
+        release_x, release_y = self.plotter.iren.interactor.GetEventPosition()
+        movement_x = release_x - press_position[0]
+        movement_y = release_y - press_position[1]
+        if movement_x * movement_x + movement_y * movement_y > CONNECTION_CLICK_MAX_MOVEMENT_PIXELS ** 2:
+            return  # a camera drag, not a click
+        self._select_connection_at_display_position(release_x, release_y)
+
+    def _select_connection_at_display_position(self, display_x, display_y):
+        """Select the connection under a display position; a miss clears a selected one."""
+        pick_targets = self.sphere_manager.get_connection_pick_targets()
+        picked_connection = None
+        if pick_targets:
+            self._connection_picker.InitializePickList()
+            for pickable_actor, _ in pick_targets:
+                self._connection_picker.AddPickList(pickable_actor)
+            if self._connection_picker.Pick(display_x, display_y, 0, self.plotter.renderer):
+                picked_actor = self._connection_picker.GetActor()
+                for pickable_actor, connection in pick_targets:
+                    if pickable_actor is picked_actor:
+                        picked_connection = connection
+                        break
+        if picked_connection is None:
+            if self.sphere_manager.get_selected_connection() is None:
+                return  # an empty click keeps the sphere selection, as before
+            self.sphere_manager.clear_connection_selection()
+        else:
+            self.sphere_manager.select_connection(picked_connection)
+        self.setFocus()
         self.plotter.render()
 
     def _handle_grow_clicked(self, sphere_index):

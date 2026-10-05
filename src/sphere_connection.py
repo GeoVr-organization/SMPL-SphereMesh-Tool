@@ -124,7 +124,19 @@ class SphereConnection:
         return self._normal_color
 
     def _current_connector_color(self):
+        if self._selected:
+            return self._selected_color
         return self._random_color if self._random_color is not None else "gray"
+
+    def get_pickable_actors(self):
+        """Visible actors a click can land on: the connector and, if shown, the spheremesh."""
+        pickable_actors = []
+        if self._connector_actor is not None and self._connector_actor.GetVisibility():
+            pickable_actors.append(self._connector_actor)
+        for spheremesh_actor in self._actors:
+            if spheremesh_actor.GetVisibility():
+                pickable_actors.append(spheremesh_actor)
+        return pickable_actors
 
     def _set_actor_mesh(self, actor, mesh, color, smooth_shading=True):
         mapper = actor.GetMapper()

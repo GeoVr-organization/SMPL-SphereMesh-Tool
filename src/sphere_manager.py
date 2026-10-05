@@ -10,6 +10,7 @@ from __future__ import annotations
 import colorsys
 import csv
 import glob
+import itertools
 import json
 import os
 import random
@@ -25,6 +26,12 @@ from src.sphere_fit import optimize_spheres, select_band
 from src.utils import measure_time
 
 JSON_VERSION = 2
+
+# "Class Colors" scheme: one color per primitive kind, measured from the lit faces of the
+# reference renders.
+SPHERE_CLASS_COLOR = "#ec191b"      # red: spheres
+CAPSULOID_CLASS_COLOR = "#357db9"   # blue: capsuloids (cones between 2 spheres)
+PRYSMOID_CLASS_COLOR = "#9449d1"    # violet: prysmoids (slabs between 3 spheres)
 
 # ---------------------------------------------------------------------------
 # Beta-offset constants
@@ -45,6 +52,9 @@ class SphereManager:
         self.spheres: List[ManagedSphere] = []
         self.connections: List[SphereConnection] = []
         self.selected_sphere_index: Optional[int] = None
+        # Cone or triangle picked in the 3D view. Exclusive with selected_sphere_index.
+        # Stored as the object, not its indices: duplicate connections exist.
+        self.selected_connection: Optional[SphereConnection] = None
 
         self.update_sphere_information_callback = sphere_information_callback
         self.spheremesh_visible = False
@@ -68,6 +78,8 @@ class SphereManager:
         self.selected_color = "cyan"
         self.locked_color = "yellow"
         self.locked_selected_color = "orange"
+        # "default", "random" or "class". Spheres and connections created later follow it.
+        self.color_scheme = "default"
 
         self._uniform_radius_override_active = False
         self._uniform_radius_value = 1.0
@@ -363,6 +375,7 @@ class SphereManager:
         )
         callback_ref["sphere"] = sphere
         self.spheres.append(sphere)
+        sphere.set_random_color(self._scheme_color_for_sphere())
         new_i = len(self.spheres) - 1
         if self._uniform_radius_override_active:
             self._pre_uniform_radius_by_index[new_i] = float(r)
@@ -372,6 +385,7 @@ class SphereManager:
                 sphere.set_radius_force(self._uniform_radius_value)
         #self.assign_parent_joint(new_i)
         self.selected_sphere_index = new_i
+        self.selected_connection = None
         self._highlight_selection()
 
         if self.spheremesh_visible:
@@ -399,10 +413,24 @@ class SphereManager:
             if i < 0 or i >= n:
                 print("Invalid connection: index out of range")
                 return False
+        conn = self._build_connection(idxs)
+        if conn is None:
+            return False
+
+        self.connections.append(conn)
+        self._show_connection_like_others(conn)
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
+        print(f"Added connection {conn.sphere_indices}")
+        return True
+
+    def _build_connection(self, sphere_indices: Tuple[int, ...]) -> Optional[SphereConnection]:
+        """Create a connection with its geometry, not yet registered; None on bad geometry."""
         try:
-            conn = SphereConnection(
+            connection = SphereConnection(
                 self.plotter,
-                idxs,
+                sphere_indices,
                 self,
                 normal_color=self.normal_color,
                 selected_color=self.selected_color,
@@ -410,25 +438,22 @@ class SphereManager:
                 locked_selected_color=self.locked_selected_color,
                 opacity=self.spheremesh_opacity,
             )
-            #print(f"[DEBUG] Connection created (manual): {idxs}")
         except ValueError as e:
             print(f"Could not create connection: {e}")
-            return False
-        conn._build_and_update_meshes()
-        if conn.spheremesh is None:
-            conn.delete()
+            return None
+        connection.set_random_color(self._scheme_color_for_connection(connection))
+        connection._build_and_update_meshes()
+        if connection.spheremesh is None:
+            connection.delete()
             print("Could not build mesh for connection (geometry error)")
-            return False
+            return None
+        return connection
 
-        self.connections.append(conn)
+    def _show_connection_like_others(self, connection: SphereConnection) -> None:
+        """Apply the current spheremesh and connector visibility to a new connection."""
         if self.spheremesh_visible:
-            conn.set_visibility(True)
-        conn.set_connector_visibility(self.sphere_widgets_visible)
-        self._highlight_selection()
-        self.update_sphere_information_callback()
-        self.mark_unsaved_changes()
-        print(f"Added connection {conn.sphere_indices}")
-        return True
+            connection.set_visibility(True)
+        connection.set_connector_visibility(self.sphere_widgets_visible)
 
     def delete_selected_sphere(self) -> bool:
         si = self.selected_sphere_index
@@ -482,15 +507,261 @@ class SphereManager:
         self.mark_unsaved_changes()
         return True
 
+    def _base_radius(self, sphere_index: int) -> float:
+        """Radius without the Inflate / uniform-radius preview applied."""
+        if self._uniform_radius_override_active:
+            stored_radius = self._pre_uniform_radius_by_index.get(sphere_index)
+            if stored_radius is not None:
+                return float(stored_radius)
+        return float(self.spheres[sphere_index].get_radius())
+
+    def _plan_division(
+        self, connection: SphereConnection, new_index: int
+    ) -> List[Tuple[SphereConnection, List[Tuple[int, ...]]]]:
+        """Pair every connection the divide replaces with the index tuples replacing it.
+
+        Cone (a, b): every connection holding both a and b (the cone, its duplicates and
+        each triangle on edge a-b) becomes one copy with b -> m and one with a -> m, which
+        keeps the cyclic order: (a, b, c) -> (a, m, c) + (m, b, c).
+        Triangle (a, b, c): the triangle and its duplicates become (a, b, m), (b, c, m),
+        (c, a, m) in the selected triangle's order.
+        Each sphere set is created once, so duplicates collapse into one set of pieces.
+        """
+        endpoint_indices = connection.sphere_indices
+        endpoint_set = set(endpoint_indices)
+        replacement_plan = []
+        planned_sphere_sets = set()
+        for existing_connection in self.connections:
+            existing_indices = existing_connection.sphere_indices
+            if len(endpoint_indices) == 2:
+                if not endpoint_set.issubset(existing_indices):
+                    continue
+                first_endpoint, second_endpoint = endpoint_indices
+                candidate_tuples = [
+                    tuple(new_index if i == second_endpoint else i for i in existing_indices),
+                    tuple(new_index if i == first_endpoint else i for i in existing_indices),
+                ]
+            else:
+                if set(existing_indices) != endpoint_set:
+                    continue
+                first_corner, second_corner, third_corner = endpoint_indices
+                candidate_tuples = [
+                    (first_corner, second_corner, new_index),
+                    (second_corner, third_corner, new_index),
+                    (third_corner, first_corner, new_index),
+                ]
+            replacement_tuples = []
+            for candidate_tuple in candidate_tuples:
+                sphere_set = frozenset(candidate_tuple)
+                if sphere_set in planned_sphere_sets:
+                    continue
+                planned_sphere_sets.add(sphere_set)
+                replacement_tuples.append(candidate_tuple)
+            replacement_plan.append((existing_connection, replacement_tuples))
+        return replacement_plan
+
+    def _bind_divided_sphere(self, new_index: int, endpoint_indices: Tuple[int, ...]) -> None:
+        """Bind the new sphere at the rest-pose mean of its endpoints, to one of their joints.
+
+        Like assign_parent_joint, the binding lives in the rest skeleton, evaluated at the
+        mean of the endpoints' rest positions. Restricting the parent to the endpoints' own
+        joints keeps the rigid single-joint rule: a shared joint is reused, which makes the
+        new rest offset the mean of the endpoints' offsets (so the sphere stays at their
+        midpoint in every pose), and mixed endpoints never pull in a third joint.
+        """
+        if self.rest_skeleton is None:
+            return
+        new_sphere = self.spheres[new_index]
+        endpoint_spheres = [self.spheres[i] for i in endpoint_indices]
+        endpoint_parent_joints = {
+            int(endpoint_sphere.get_parent_joint())
+            for endpoint_sphere in endpoint_spheres
+            if endpoint_sphere.get_parent_joint() is not None
+        }
+
+        endpoint_rest_positions = []
+        for endpoint_sphere in endpoint_spheres:
+            endpoint_parent = endpoint_sphere.get_parent_joint()
+            endpoint_rest_offset = endpoint_sphere.get_rest_offset()
+            if endpoint_parent is None or endpoint_rest_offset is None:
+                endpoint_rest_positions = []
+                break
+            endpoint_rest_positions.append(
+                self.rest_skeleton.transform_point(endpoint_rest_offset, endpoint_parent)
+            )
+        if endpoint_rest_positions:
+            rest_point = np.mean(endpoint_rest_positions, axis=0)
+        else:
+            # Unbound endpoint: fall back to the current center, as assign_parent_joint does.
+            rest_point = new_sphere.get_center()
+
+        allowed_parent_joints = endpoint_parent_joints if endpoint_parent_joints else None
+        parent_joint, child_joint = self._closest_bone(rest_point, allowed_parent_joints)
+        if parent_joint is None:
+            if allowed_parent_joints is None:
+                return
+            # Every endpoint joint is a leaf (hand, foot, head): bind to the nearest one.
+            parent_joint = min(
+                allowed_parent_joints,
+                key=lambda joint: float(np.linalg.norm(self.rest_skeleton.joints[joint] - rest_point)),
+            )
+
+        parent_rest_rotation = self.rest_skeleton.get_joint_rotation(parent_joint)
+        rest_offset = np.dot(
+            parent_rest_rotation.T, rest_point - self.rest_skeleton.joints[parent_joint]
+        )
+        new_sphere.set_parent_joint(int(parent_joint), rest_offset)
+
+        if child_joint is None:
+            new_sphere.set_secondary_joint(None, None, 1.0)
+            return
+        lbs_weight = self._primary_lbs_weight_on_bone(rest_point, parent_joint, child_joint)
+        child_rest_rotation = self.rest_skeleton.get_joint_rotation(child_joint)
+        secondary_rest_offset = np.dot(
+            child_rest_rotation.T, rest_point - self.rest_skeleton.joints[child_joint]
+        )
+        new_sphere.set_secondary_joint(int(child_joint), secondary_rest_offset, lbs_weight)
+
+    def _extend_beta_offsets_for_divided_sphere(
+        self, new_index: int, endpoint_indices: Tuple[int, ...]
+    ) -> None:
+        """Give the new sphere the mean of its endpoints' beta rows (exact: the model is linear)."""
+        if self._beta_template_pos is None or self._beta_template_r is None:
+            return
+        if self._beta_template_pos.shape[0] != new_index:
+            print(
+                f"[warn] Divide: beta offsets cover {self._beta_template_pos.shape[0]} spheres, "
+                f"not {new_index}; the new sphere will not follow the beta sliders"
+            )
+            return
+        endpoint_rows = list(endpoint_indices)
+        self._beta_template_pos = np.vstack(
+            [self._beta_template_pos, self._beta_template_pos[endpoint_rows].mean(axis=0)]
+        )
+        self._beta_template_r = np.append(
+            self._beta_template_r, self._beta_template_r[endpoint_rows].mean()
+        )
+        for beta_index in self.offsets_pos:
+            self.offsets_pos[beta_index] = np.vstack(
+                [self.offsets_pos[beta_index], self.offsets_pos[beta_index][endpoint_rows].mean(axis=0)]
+            )
+            self.offsets_r[beta_index] = np.append(
+                self.offsets_r[beta_index], self.offsets_r[beta_index][endpoint_rows].mean()
+            )
+
+    def divide_connection(self, connection: SphereConnection, body_mesh=None) -> Optional[int]:
+        """Split a cone at its midpoint or a triangle at its centroid with a new sphere.
+
+        The new sphere m gets the mean center and the mean (base) radius of the endpoints
+        and is appended, so no existing index changes. A cone (a, b) becomes (a, m) + (m, b),
+        and every triangle on edge a-b is split along with it; a triangle (a, b, c) becomes
+        (a, b, m) + (b, c, m) + (c, a, m). The union of the pieces equals the original
+        volume exactly. Nothing changes if any new piece cannot be built.
+
+        Returns the new sphere's index, or None on failure.
+        """
+        if connection not in self.connections:
+            print("Divide: the connection is not part of the current topology")
+            return None
+        endpoint_indices = connection.sphere_indices
+        new_index = len(self.spheres)
+        new_center = np.mean([self.spheres[i].get_center() for i in endpoint_indices], axis=0)
+        new_base_radius = float(np.mean([self._base_radius(i) for i in endpoint_indices]))
+
+        replacement_plan = self._plan_division(connection, new_index)
+
+        def _center_of(sphere_index: int):
+            if sphere_index == new_index:
+                return new_center
+            return self.spheres[sphere_index].get_center()
+
+        for _, replacement_tuples in replacement_plan:
+            for replacement_tuple in replacement_tuples:
+                for first_index, second_index in itertools.combinations(replacement_tuple, 2):
+                    if np.linalg.norm(_center_of(first_index) - _center_of(second_index)) <= 1e-9:
+                        print(f"Divide: spheres {first_index} and {second_index} coincide, nothing changed")
+                        return None
+
+        previous_selected_sphere_index = self.selected_sphere_index
+        had_unsaved_changes = self.has_unsaved_changes
+        self.add_sphere(new_center, new_base_radius)  # colored by the active scheme
+        new_sphere = self.spheres[new_index]
+
+        built_replacements: List[Tuple[SphereConnection, List[SphereConnection]]] = []
+        built_connections: List[SphereConnection] = []
+        for replaced_connection, replacement_tuples in replacement_plan:
+            replacement_connections = []
+            for replacement_tuple in replacement_tuples:
+                replacement_connection = self._build_connection(replacement_tuple)
+                if replacement_connection is None:
+                    for built_connection in built_connections:
+                        built_connection.delete()
+                    self.spheres.pop().delete_widget()
+                    self._pre_uniform_radius_by_index.pop(new_index, None)
+                    self.selected_sphere_index = previous_selected_sphere_index
+                    self.selected_connection = connection
+                    self.has_unsaved_changes = had_unsaved_changes
+                    self._highlight_selection()
+                    self.update_sphere_information_callback()
+                    print(f"Divide: could not build {replacement_tuple}, nothing changed")
+                    return None
+                replacement_connections.append(replacement_connection)
+                built_connections.append(replacement_connection)
+            built_replacements.append((replaced_connection, replacement_connections))
+
+        # Swap in place so the saved connection order stays stable.
+        replacements_by_connection_id = {
+            id(replaced_connection): replacement_connections
+            for replaced_connection, replacement_connections in built_replacements
+        }
+        updated_connections: List[SphereConnection] = []
+        for existing_connection in self.connections:
+            replacement_connections = replacements_by_connection_id.get(id(existing_connection))
+            if replacement_connections is None:
+                updated_connections.append(existing_connection)
+                continue
+            inherited_random_color = existing_connection.get_random_color()
+            existing_connection.delete()
+            for replacement_connection in replacement_connections:
+                if inherited_random_color is not None:
+                    replacement_connection.set_random_color(inherited_random_color)
+                updated_connections.append(replacement_connection)
+        self.connections = updated_connections
+        for built_connection in built_connections:
+            self._show_connection_like_others(built_connection)
+
+        self._bind_divided_sphere(new_index, endpoint_indices)
+        if body_mesh is not None:
+            touch_radius, nearest_vertex_index = self._compute_touch_radius_and_nearest_vertex(
+                new_sphere, np.asarray(body_mesh.points)
+            )
+            if touch_radius is not None:
+                new_sphere.set_nearest_vertex_index(nearest_vertex_index)
+                if touch_radius > 1e-12:
+                    new_sphere.set_rest_radius(new_base_radius / touch_radius)
+        self._extend_beta_offsets_for_divided_sphere(new_index, endpoint_indices)
+
+        self.selected_connection = None
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
+        replaced_descriptions = ", ".join(
+            str(list(replaced_connection.sphere_indices)) for replaced_connection, _ in built_replacements
+        )
+        new_descriptions = ", ".join(str(list(c.sphere_indices)) for c in built_connections)
+        print(f"Divided {replaced_descriptions} with sphere #{new_index} into {new_descriptions}")
+        return new_index
+
     def _on_sphere_interaction(self, sphere_index: int, center):
         if self._is_mirroring_update:
             return
         center = np.array(center, dtype=np.float64)
         print(f"Interacted with sphere {sphere_index}")
 
-        if self.selected_sphere_index != sphere_index:
+        if self.selected_sphere_index != sphere_index or self.selected_connection is not None:
             self._unhighlight_all()
             self.selected_sphere_index = sphere_index
+            self.selected_connection = None
             self._highlight_selection()
 
         if self.lock_button_callback:
@@ -668,15 +939,54 @@ class SphereManager:
     def _highlight_selection(self):
         si = self.selected_sphere_index
         highlighted = set()
-        # Never auto-highlight connected spheres/connections: only current sphere.
+        # Never auto-highlight connected spheres/connections: only the current sphere,
+        # or the connection picked in the 3D view.
+        selected_connection = self.get_selected_connection()
+        self.selected_connection = selected_connection
         for c in self.connections:
-            c.set_selected(False)
+            c.set_selected(c is selected_connection)
         if si is not None and 0 <= si < len(self.spheres):
             highlighted.add(si)
         for i, s in enumerate(self.spheres):
             s.set_highlighted(i in highlighted)
         if self.lock_button_callback and si is not None:
             self._call_lock_button_callback()
+
+    def get_selected_connection(self) -> Optional[SphereConnection]:
+        """The picked cone/triangle, or None (also when it has been deleted since)."""
+        if self.selected_connection is None or self.selected_connection not in self.connections:
+            return None
+        return self.selected_connection
+
+    def select_connection(self, connection: SphereConnection) -> bool:
+        """Select a cone/triangle; this deselects the sphere so sphere edits can't hit it unseen."""
+        if connection not in self.connections:
+            return False
+        self.selected_sphere_index = None
+        self.selected_connection = connection
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+        return True
+
+    def clear_connection_selection(self) -> None:
+        self.selected_connection = None
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+
+    def get_connection_pick_targets(self) -> List[Tuple[object, SphereConnection]]:
+        """(actor, connection) for every visible actor a click can select a connection by."""
+        return [
+            (pickable_actor, connection)
+            for connection in self.connections
+            for pickable_actor in connection.get_pickable_actors()
+        ]
+
+    @staticmethod
+    def describe_connection(connection: SphereConnection) -> str:
+        """Short label such as 'cone (3, 7)' or 'triangle (1, 3, 4)'."""
+        sphere_indices = connection.sphere_indices
+        kind = "cone" if len(sphere_indices) == 2 else "triangle"
+        return f"{kind} ({', '.join(str(i) for i in sphere_indices)})"
 
     @staticmethod
     def _random_vivid_color():
@@ -687,23 +997,48 @@ class SphereManager:
         red, green, blue = colorsys.hsv_to_rgb(hue, saturation, value)
         return (red, green, blue)
 
-    def randomize_colors(self):
-        """Give every sphere, cone (2-sphere) and plane (3-sphere) its own random color."""
+    def _scheme_color_for_sphere(self):
+        """Override color a sphere gets under the active color scheme; None keeps the default."""
+        if self.color_scheme == "class":
+            return SPHERE_CLASS_COLOR
+        if self.color_scheme == "random":
+            return self._random_vivid_color()
+        return None
+
+    def _scheme_color_for_connection(self, connection: SphereConnection):
+        """Override color a cone/triangle gets under the active color scheme; None keeps the default."""
+        if self.color_scheme == "class":
+            if len(connection.sphere_indices) == 2:
+                return CAPSULOID_CLASS_COLOR
+            return PRYSMOID_CLASS_COLOR
+        if self.color_scheme == "random":
+            return self._random_vivid_color()
+        return None
+
+    def _apply_color_scheme(self):
+        """Recolor every sphere and connection from the active scheme."""
         for sphere in self.spheres:
-            sphere.set_random_color(self._random_vivid_color())
+            sphere.set_random_color(self._scheme_color_for_sphere())
         for connection in self.connections:
-            connection.set_random_color(self._random_vivid_color())
+            connection.set_random_color(self._scheme_color_for_connection(connection))
         # Selection/lock colors take precedence, so re-apply them on top.
         self._highlight_selection()
+
+    def randomize_colors(self):
+        """Give every sphere, cone (2-sphere) and plane (3-sphere) its own random color."""
+        self.color_scheme = "random"
+        self._apply_color_scheme()
         return len(self.spheres) + len(self.connections)
 
+    def apply_class_colors(self):
+        """Color by primitive: spheres red, capsuloids (cones) blue, prysmoids (triangles) violet."""
+        self.color_scheme = "class"
+        self._apply_color_scheme()
+
     def reset_colors(self):
-        """Drop random color overrides and restore the default sphere/connection colors."""
-        for sphere in self.spheres:
-            sphere.set_random_color(None)
-        for connection in self.connections:
-            connection.set_random_color(None)
-        self._highlight_selection()
+        """Drop color overrides and restore the default sphere/connection colors."""
+        self.color_scheme = "default"
+        self._apply_color_scheme()
 
     def toggle_spheremeshes(self, state):
         self.spheremesh_visible = bool(state)
@@ -723,13 +1058,12 @@ class SphereManager:
         closest = A + t * AB
         return np.linalg.norm(P - closest)
 
-    def assign_parent_joint(self, sphere_index: int):
-        if self.rest_skeleton is None:
-            return
-        if sphere_index < 0 or sphere_index >= len(self.spheres):
-            return
-        sp = self.spheres[sphere_index]
-        center = sp.get_center()
+    def _closest_bone(self, point, allowed_parent_joints=None) -> Tuple[Optional[int], Optional[int]]:
+        """(parent, child) of the rest-skeleton bone closest to point; (None, None) if none.
+
+        allowed_parent_joints, when given, restricts the search to bones whose parent end
+        is one of those joints.
+        """
         min_dist = np.inf
         best_parent = None
         best_child = None
@@ -737,13 +1071,38 @@ class SphereManager:
         for i in range(1, len(kintree)):
             p = kintree[i]
             c = i
+            if allowed_parent_joints is not None and int(p) not in allowed_parent_joints:
+                continue
             p_pos = self.rest_skeleton.joints[p]
             c_pos = self.rest_skeleton.joints[c]
-            dist = self.point_segment_distance(center, p_pos, c_pos)
+            dist = self.point_segment_distance(point, p_pos, c_pos)
             if dist < min_dist:
                 min_dist = dist
                 best_parent = p
                 best_child = c
+        return best_parent, best_child
+
+    def _primary_lbs_weight_on_bone(self, point, parent_joint: int, child_joint: int) -> float:
+        """Weight of the parent end: 1 at the parent joint, 0 at the child joint (rest pose)."""
+        p_pos = self.rest_skeleton.joints[parent_joint]
+        c_pos = self.rest_skeleton.joints[child_joint]
+        seg = c_pos - p_pos
+        seg_len_sq = float(np.dot(seg, seg))
+        if seg_len_sq > 1e-12:
+            t = float(np.dot(point - p_pos, seg) / seg_len_sq)
+            t = max(0.0, min(1.0, t))
+        else:
+            t = 0.0
+        return 1.0 - t
+
+    def assign_parent_joint(self, sphere_index: int):
+        if self.rest_skeleton is None:
+            return
+        if sphere_index < 0 or sphere_index >= len(self.spheres):
+            return
+        sp = self.spheres[sphere_index]
+        center = sp.get_center()
+        best_parent, best_child = self._closest_bone(center)
 
         rest_offset = None
         if best_parent is not None:
@@ -754,7 +1113,7 @@ class SphereManager:
         sp.set_parent_joint(best_parent, rest_offset)
 
         # --- secondary joint = child of the best parent-child segment ---
-        # The first loop already picked the kintree segment (best_parent -> best_child)
+        # _closest_bone already picked the kintree segment (best_parent -> best_child)
         # closest to the sphere center.  Re-use its child end as the secondary joint
         # and derive the LBS blend weight from the projection of the sphere center
         # onto that segment: t = 0 at the parent end (all weight on primary),
@@ -765,17 +1124,8 @@ class SphereManager:
 
         if best_parent is not None and best_child is not None:
             secondary_joint = int(best_child)
-
-            p_pos = self.rest_skeleton.joints[best_parent]
             c_pos = self.rest_skeleton.joints[secondary_joint]
-            seg = c_pos - p_pos
-            seg_len_sq = float(np.dot(seg, seg))
-            if seg_len_sq > 1e-12:
-                t = float(np.dot(center - p_pos, seg) / seg_len_sq)
-                t = max(0.0, min(1.0, t))
-            else:
-                t = 0.0
-            lbs_weight = 1.0 - t
+            lbs_weight = self._primary_lbs_weight_on_bone(center, best_parent, secondary_joint)
 
             R_secondary_rest = self.rest_skeleton.get_joint_rotation(secondary_joint)
             world_offset_2 = center - c_pos
@@ -876,7 +1226,24 @@ class SphereManager:
         return self.selected_sphere_index
 
     def get_selected_sphere_display_data(self):
-        """UI: only the globally selected sphere (one row of controls)."""
+        """UI: the selected sphere (one slot), or the spheres of the selected cone/triangle
+        (one slot per sphere, in connection order)."""
+        selected_connection = self.get_selected_connection()
+        if selected_connection is not None:
+            endpoint_indices = list(selected_connection.sphere_indices)
+            endpoint_spheres = [self.spheres[i] for i in endpoint_indices]
+            return {
+                "sphere_index": None,
+                "connection": selected_connection,
+                "twin_index": None,
+                "num_slots": len(endpoint_indices),
+                "endpoint_indices": endpoint_indices,
+                "centers": [endpoint_sphere.get_center().tolist() for endpoint_sphere in endpoint_spheres],
+                "radii": [endpoint_sphere.get_radius() for endpoint_sphere in endpoint_spheres],
+                "locked_per_sphere": [endpoint_sphere.locked for endpoint_sphere in endpoint_spheres],
+                "selected_local_index": None,
+                "incident_connections": [],
+            }
         si = self.selected_sphere_index
         if si is None or not self.spheres:
             return None
@@ -986,6 +1353,7 @@ class SphereManager:
             new_i = (si - 1) % n
         self._unhighlight_all()
         self.selected_sphere_index = new_i
+        self.selected_connection = None
         self._highlight_selection()
         self.update_sphere_information_callback()
 
@@ -1000,6 +1368,7 @@ class SphereManager:
             new_i = (si + 1) % n
         self._unhighlight_all()
         self.selected_sphere_index = new_i
+        self.selected_connection = None
         self._highlight_selection()
         self.update_sphere_information_callback()
 
@@ -1331,6 +1700,7 @@ class SphereManager:
             self.selected_sphere_index = None
         else:
             base_index = len(self.spheres)
+        self.selected_connection = None
 
         for entry in data["spheres"]:
             center = _trim_center_xyz_3decimals(entry["center"])
@@ -1380,6 +1750,7 @@ class SphereManager:
             sp.set_rest_radius(rr)
             sp.set_nearest_vertex_index(nvi)
             sp.set_locked(locked)
+            sp.set_random_color(self._scheme_color_for_sphere())
             callback_ref["sphere"] = sp
             self.spheres.append(sp)
 
@@ -1404,6 +1775,7 @@ class SphereManager:
                     opacity=self.spheremesh_opacity,
                 )
                 #print(f"[DEBUG] Connection created (load/import): {mapped}")
+                conn.set_random_color(self._scheme_color_for_connection(conn))
                 if self.spheremesh_visible:
                     conn.set_visibility(True)
                 conn.set_connector_visibility(self.sphere_widgets_visible)

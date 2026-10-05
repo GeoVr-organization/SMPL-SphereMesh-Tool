@@ -1,0 +1,7 @@
+{
+    "python.REPL.enableREPLSmartSend": false,
+    // The default "wasm" marimo language server runs in Pyodide with no
+    // access to the disk, so it ignores .marimo.toml and the notebook's
+    // [tool.marimo] header (e.g. output_max_bytes). "python" reads them.
+    "marimo.lsp.server": "python"
+}
