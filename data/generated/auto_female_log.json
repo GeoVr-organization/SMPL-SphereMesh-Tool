@@ -1,0 +1,587 @@
+{
+ "design": {
+  "lower_rows": [
+   0.075,
+   -0.005,
+   -0.085,
+   -0.165,
+   -0.24
+  ],
+  "upper_rows": [
+   0.14,
+   0.2,
+   0.26
+  ],
+  "lower_columns": [
+   0.0,
+   0.7
+  ],
+  "upper_columns": [
+   0.0,
+   0.75
+  ],
+  "crotch_row": null,
+  "upper_arm": [
+   0.06,
+   0.38,
+   0.68,
+   0.93
+  ],
+  "forearm": [
+   0.1,
+   0.4,
+   0.7,
+   0.95
+  ],
+  "thigh": [
+   0.07,
+   0.19,
+   0.36,
+   0.62,
+   0.9
+  ],
+  "shin": [
+   0.07443883659763159,
+   0.3544388365976316,
+   0.6344388365976316,
+   0.9144388365976316
+  ],
+  "hip": [
+   -0.26,
+   -0.1
+  ],
+  "deltoid": 0.7,
+  "clavicle": 0.2893989628522939,
+  "neck": [
+   0.02,
+   0.42
+  ],
+  "glute_count": 3,
+  "glute_box_low": [
+   0.02,
+   -0.06,
+   -0.17
+  ],
+  "glute_box_high": [
+   0.17,
+   0.115,
+   -0.045
+  ],
+  "glute_separation": 0.055,
+  "section_method": "cut",
+  "protrusion_weight": 6.0,
+  "max_offset": 0.02,
+  "radius_scale_bounds": [
+   0.7,
+   1.3
+  ],
+  "pose_weight": 0.0,
+  "pose_tolerance": 0.012,
+  "max_spheres": 96,
+  "gap_threshold": 0.012,
+  "fill_rounds": 12,
+  "fill_protrusion_tolerance": 0.008,
+  "link_max": 8,
+  "link_protrusion_tolerance": 0.01,
+  "walk_budget": 3,
+  "repair_posed_tolerance": null
+ },
+ "timings": {
+  "place": 2.3,
+  "quick_fit": 7.4,
+  "link": 5.0,
+  "fill": 32.7,
+  "link_2": 5.5,
+  "full_fit": 146.3,
+  "link_3": 1.2,
+  "slabs": 0.0,
+  "validate": 6.6
+ },
+ "placed": {
+  "spheres": 78,
+  "summary": "78 spheres (L_arm 10, L_leg 15, R_arm 10, R_leg 15, neck 2, trunk 26); 61 doubles, 14 triples, 12 quads",
+  "bindings": {
+   "M_lower_r0": "spine3",
+   "L_lower_r0": "spine3",
+   "M_lower_r1": "spine1",
+   "L_lower_r1": "spine1",
+   "M_lower_r2": "spine1",
+   "L_lower_r2": "spine1",
+   "M_lower_r3": "pelvis",
+   "L_lower_r3": "pelvis",
+   "M_lower_r4": "pelvis",
+   "L_lower_r4": "pelvis",
+   "M_upper_r0": "spine3",
+   "L_upper_r0": "spine3",
+   "M_upper_r1": "spine3",
+   "L_upper_r1": "spine3",
+   "M_upper_r2": "spine3",
+   "L_upper_r2": "L_collar",
+   "neck_0": "neck",
+   "neck_1": "neck",
+   "L_upperarm_0": "L_shoulder",
+   "L_upperarm_1": "L_shoulder",
+   "L_upperarm_2": "L_shoulder",
+   "L_upperarm_3": "L_shoulder",
+   "L_forearm_0": "L_elbow",
+   "L_forearm_1": "L_elbow",
+   "L_forearm_2": "L_elbow",
+   "L_forearm_3": "L_elbow",
+   "L_wrist_stub": "L_wrist",
+   "L_deltoid_0": "L_collar",
+   "L_clavicle_0": "L_collar",
+   "L_hip_0": "pelvis",
+   "L_hip_1": "pelvis",
+   "L_glute_0": "pelvis",
+   "L_glute_1": "pelvis",
+   "L_glute_2": "pelvis",
+   "L_thigh_0": "L_hip",
+   "L_thigh_1": "L_hip",
+   "L_thigh_2": "L_hip",
+   "L_thigh_3": "L_hip",
+   "L_thigh_4": "L_hip",
+   "L_shin_0": "L_knee",
+   "L_shin_1": "L_knee",
+   "L_shin_2": "L_knee",
+   "L_shin_3": "L_knee",
+   "L_ankle_stub": "L_ankle",
+   "R_lower_r0": "spine3",
+   "R_lower_r1": "spine1",
+   "R_lower_r2": "spine1",
+   "R_lower_r3": "pelvis",
+   "R_lower_r4": "pelvis",
+   "R_upper_r0": "spine3",
+   "R_upper_r1": "spine3",
+   "R_upper_r2": "R_collar",
+   "R_upperarm_0": "R_shoulder",
+   "R_upperarm_1": "R_shoulder",
+   "R_upperarm_2": "R_shoulder",
+   "R_upperarm_3": "R_shoulder",
+   "R_forearm_0": "R_elbow",
+   "R_forearm_1": "R_elbow",
+   "R_forearm_2": "R_elbow",
+   "R_forearm_3": "R_elbow",
+   "R_wrist_stub": "R_wrist",
+   "R_deltoid_0": "R_collar",
+   "R_clavicle_0": "R_collar",
+   "R_hip_0": "pelvis",
+   "R_hip_1": "pelvis",
+   "R_glute_0": "pelvis",
+   "R_glute_1": "pelvis",
+   "R_glute_2": "pelvis",
+   "R_thigh_0": "R_hip",
+   "R_thigh_1": "R_hip",
+   "R_thigh_2": "R_hip",
+   "R_thigh_3": "R_hip",
+   "R_thigh_4": "R_hip",
+   "R_shin_0": "R_knee",
+   "R_shin_1": "R_knee",
+   "R_shin_2": "R_knee",
+   "R_shin_3": "R_knee",
+   "R_ankle_stub": "R_knee"
+  }
+ },
+ "quick_fit": {
+  "binding_margin_min_mm": 0.0,
+  "binding_fragile": [
+   "M_lower_r0",
+   "M_lower_r4",
+   "L_upper_r1",
+   "L_upper_r2",
+   "neck_0",
+   "L_hip_1",
+   "L_glute_0",
+   "L_ankle_stub",
+   "R_upper_r1",
+   "R_upper_r2",
+   "R_wrist_stub",
+   "R_hip_1",
+   "R_glute_0",
+   "R_ankle_stub"
+  ],
+  "rounds": [
+   {
+    "round": 0,
+    "iterations": 40,
+    "evaluations": 45,
+    "loss": 7.222210552922922e-05,
+    "binding_changed": [
+     "R_ankle_stub"
+    ],
+    "message": "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT"
+   },
+   {
+    "round": 1,
+    "iterations": 40,
+    "evaluations": 57,
+    "loss": 5.7855623077328265e-05,
+    "binding_changed": [],
+    "message": "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT"
+   }
+  ],
+  "frozen_centers": [
+   "L_ankle_stub"
+  ],
+  "restrained_centers": {},
+  "binding_changed": [],
+  "binding_accepted": [],
+  "mean_displacement": 0.005744142953396082,
+  "max_displacement": 0.02858209190164741,
+  "radius_scale_min": 0.8250342154544736,
+  "radius_scale_max": 1.0436160238795853,
+  "free_parameters": 176,
+  "fit_points": 1213,
+  "poses": 0,
+  "seconds": 7.298159900121391
+ },
+ "links": [
+  {
+   "round": 0,
+   "cone": [
+    "L_upperarm_1",
+    "L_deltoid_0"
+   ],
+   "steps_removed": 61,
+   "pair_steps": 29,
+   "protrusion_mm": 6.2,
+   "expensive_before": 315
+  },
+  {
+   "round": 1,
+   "cone": [
+    "neck_1",
+    "M_upper_r2"
+   ],
+   "steps_removed": 28,
+   "pair_steps": 11,
+   "protrusion_mm": 1.4,
+   "expensive_before": 254
+  },
+  {
+   "round": 2,
+   "cone": [
+    "R_glute_0",
+    "R_thigh_1"
+   ],
+   "steps_removed": 16,
+   "pair_steps": 14,
+   "protrusion_mm": 8.3,
+   "expensive_before": 226
+  },
+  {
+   "round": 3,
+   "cone": [
+    "M_lower_r4",
+    "R_glute_0"
+   ],
+   "steps_removed": 5,
+   "pair_steps": 11,
+   "protrusion_mm": 7.9,
+   "expensive_before": 210
+  },
+  {
+   "round": 4,
+   "cone": [
+    "L_glute_0",
+    "L_hip_1"
+   ],
+   "steps_removed": 17,
+   "pair_steps": 7,
+   "protrusion_mm": 1.6,
+   "expensive_before": 205
+  },
+  {
+   "round": 5,
+   "stop": "no admissible cone gains enough (best 0)"
+  }
+ ],
+ "fills": [
+  {
+   "round": 0,
+   "name": "L_fill_0",
+   "center": [
+    0.0572,
+    0.0594,
+    0.1284
+   ],
+   "radius_mm": 16.5,
+   "reached": 3,
+   "cluster_size": 50,
+   "cluster_worst_mm": 23.7,
+   "cluster_joint": "spine2",
+   "links": [
+    [
+     "L_lower_r0",
+     4.1
+    ],
+    [
+     "M_lower_r0",
+     3.1
+    ]
+   ],
+   "binding": "spine2",
+   "spheres_now": 80
+  },
+  {
+   "round": 1,
+   "name": "L_fill_1",
+   "center": [
+    0.0777,
+    0.0834,
+    0.0684
+   ],
+   "radius_mm": 69.1,
+   "reached": 41,
+   "cluster_size": 43,
+   "cluster_worst_mm": 23.0,
+   "cluster_joint": "spine3",
+   "links": [
+    [
+     "L_lower_r0",
+     2.9
+    ],
+    [
+     "L_upper_r0",
+     1.1
+    ]
+   ],
+   "binding": "spine3",
+   "spheres_now": 82
+  },
+  {
+   "round": 2,
+   "name": "M_fill_4",
+   "center": [
+    0.0,
+    -0.2213,
+    0.0566
+   ],
+   "radius_mm": 99.3,
+   "reached": 11,
+   "cluster_size": 11,
+   "cluster_worst_mm": 17.2,
+   "cluster_joint": "pelvis",
+   "links": [
+    [
+     "M_lower_r3",
+     0.6
+    ],
+    [
+     "M_lower_r4",
+     3.2
+    ]
+   ],
+   "binding": "pelvis",
+   "spheres_now": 83
+  },
+  {
+   "round": 3,
+   "name": "L_fill_2",
+   "center": [
+    0.4305,
+    0.2212,
+    -0.0276
+   ],
+   "radius_mm": 29.4,
+   "reached": 6,
+   "cluster_size": 8,
+   "cluster_worst_mm": 14.4,
+   "cluster_joint": "L_elbow",
+   "links": [
+    [
+     "L_forearm_0",
+     0.7
+    ],
+    [
+     "L_upperarm_3",
+     1.4
+    ]
+   ],
+   "binding": "L_elbow",
+   "spheres_now": 85
+  },
+  {
+   "round": 4,
+   "stop": "no cluster left"
+  }
+ ],
+ "links_after_fill": [
+  {
+   "round": 0,
+   "cone": [
+    "L_glute_0",
+    "L_thigh_1"
+   ],
+   "steps_removed": 12,
+   "pair_steps": 10,
+   "protrusion_mm": 5.5,
+   "expensive_before": 181
+  },
+  {
+   "round": 1,
+   "cone": [
+    "L_fill_0",
+    "L_fill_1"
+   ],
+   "steps_removed": 8,
+   "pair_steps": 5,
+   "protrusion_mm": 0.0,
+   "expensive_before": 169
+  },
+  {
+   "round": 2,
+   "cone": [
+    "M_lower_r4",
+    "L_glute_0"
+   ],
+   "steps_removed": 5,
+   "pair_steps": 17,
+   "protrusion_mm": 3.3,
+   "expensive_before": 161
+  },
+  {
+   "round": 3,
+   "stop": "no admissible cone gains enough (best 0)"
+  }
+ ],
+ "full_fit_starts": {
+  "continued": {
+   "loss": 2.6518165329965775e-05,
+   "max_gap_mm": 29.3,
+   "max_protrusion_mm": 4.8
+  },
+  "from_placement": {
+   "loss": 4.508893117324894e-05,
+   "max_gap_mm": 32.3,
+   "max_protrusion_mm": 7.4
+  }
+ },
+ "full_fit_start": "continued",
+ "full_fit": {
+  "binding_margin_min_mm": 0.0,
+  "binding_fragile": [
+   "M_lower_r0",
+   "L_lower_r1",
+   "M_lower_r4",
+   "L_upper_r1",
+   "L_upper_r2",
+   "neck_0",
+   "L_hip_1",
+   "L_glute_0",
+   "L_ankle_stub",
+   "R_lower_r1",
+   "R_upper_r1",
+   "R_upper_r2",
+   "R_wrist_stub",
+   "R_hip_1",
+   "R_glute_0",
+   "R_ankle_stub",
+   "L_fill_0",
+   "R_fill_0",
+   "M_fill_4"
+  ],
+  "rounds": [
+   {
+    "round": 0,
+    "iterations": 150,
+    "evaluations": 164,
+    "loss": 2.6748014829632384e-05,
+    "binding_changed": [
+     "R_ankle_stub"
+    ],
+    "message": "STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT"
+   },
+   {
+    "round": 1,
+    "iterations": 146,
+    "evaluations": 164,
+    "loss": 2.6411034358365164e-05,
+    "binding_changed": [
+     "R_ankle_stub"
+    ],
+    "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   },
+   {
+    "round": 2,
+    "iterations": 80,
+    "evaluations": 88,
+    "loss": 2.6518165329965775e-05,
+    "binding_changed": [],
+    "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   }
+  ],
+  "frozen_centers": [
+   "L_ankle_stub"
+  ],
+  "restrained_centers": {
+   "L_ankle_stub": 10.0
+  },
+  "binding_changed": [],
+  "binding_accepted": [
+   "R_upper_r1"
+  ],
+  "mean_displacement": 0.001263881956356789,
+  "max_displacement": 0.00645815915866917,
+  "radius_scale_min": 0.9309004477419043,
+  "radius_scale_max": 1.227325804698925,
+  "free_parameters": 192,
+  "fit_points": 3638,
+  "poses": 0,
+  "seconds": 80.14177010022104,
+  "history_tail": [
+   {
+    "loss": 2.6518387023254515e-05,
+    "rest": 2.5820134135664388e-05,
+    "pose": 0.0,
+    "max_gap": 0.029287766128275706,
+    "max_protrusion": 0.004745818166122351
+   },
+   {
+    "loss": 2.6518240627478598e-05,
+    "rest": 2.58190002612121e-05,
+    "pose": 0.0,
+    "max_gap": 0.029290759525929057,
+    "max_protrusion": 0.004752431370983287
+   },
+   {
+    "loss": 2.6518165329965775e-05,
+    "rest": 2.5819208521283236e-05,
+    "pose": 0.0,
+    "max_gap": 0.029295030430046755,
+    "max_protrusion": 0.0047512255342044285
+   }
+  ]
+ },
+ "links_after_fit": [
+  {
+   "round": 0,
+   "stop": "no admissible cone gains enough (best 0)"
+  }
+ ],
+ "degenerate_slabs_replaced": [
+  {
+   "triangle": [
+    "L_clavicle_0",
+    "L_upper_r1",
+    "L_upper_r2"
+   ],
+   "radii_mm": [
+    60.5,
+    75.0,
+    41.9
+   ]
+  },
+  {
+   "triangle": [
+    "R_clavicle_0",
+    "R_upper_r1",
+    "R_upper_r2"
+   ],
+   "radii_mm": [
+    60.5,
+    75.0,
+    41.9
+   ]
+  }
+ ]
+}

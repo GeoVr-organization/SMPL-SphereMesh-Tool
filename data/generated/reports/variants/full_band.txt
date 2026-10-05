@@ -1,0 +1,135 @@
+topology  full_band  (male)
+spec      96 spheres (L_arm 10, L_leg 15, R_arm 10, R_leg 15, fill 17, neck 2, trunk 27); 117 doubles, 14 triples, 12 quads
+
+  [PASS] budget/spheres                       96 spheres (limit 99)
+  [PASS] budget/triangles                     14 three-sphere connections (limit 20)
+  [PASS] budget/quads                         12 four-sphere connections (limit 40)
+  [PASS] graph/spheres-connected              1 component(s)
+  [PASS] graph/bumpers-connected              1 component(s) over 292 bumpers (96 spheres, 170 cones, 14 prysmoids, 12 quads)
+  [PASS] graph/no-degenerate-primitives       none
+  [PASS] geometry/mirror-symmetric            every sphere has an x-mirror twin
+  [FAIL] fidelity/max-gap                     worst gap 31.6 mm, 12.50% of vertices over 15 mm (RMS 9.4 mm)
+  [FAIL] fidelity/gap-fraction                12.50% of modelled vertices sit further than 15 mm from the collider
+  [FAIL] fidelity/max-protrusion              collider pokes 5.4 mm through the skin at worst, 0.03% of vertices affected
+  [PASS] fidelity/protrusion-fraction         0.03% of modelled vertices are inside the collider by more than 5 mm
+  [FAIL] watchdog/walk-break-rate             231 of 10766 surface steps (2.15%) need more than 3 hops (0 unreachable at all); mean walk 0.62 hops; worst cone[L_upper_r0, L_deltoid_0]<->cone[L_upperarm_0, L_fill_1] x12 / cone[M_upper_r2, neck_1]<->cone[L_upper_r2, neck_0] x11 / cone[M_crotch_r0, R_thigh_0]<->cone[R_glute_0, R_thigh_1] x11
+  [FAIL] watchdog/no-wasteful-connections     3 connection(s) own no surface and are not load-bearing: cone[M_upper_r2, neck_0], cone[L_deltoid_0, L_clavicle_0], cone[R_deltoid_0, R_clavicle_0] (44 more own nothing but keep the walk short; 29 spheres are buried inside their own cones, which is expected along a chain)
+  [PASS] watchdog/non-adjacent-overlap        123 of 6248 locally exposed surface samples (1.97%) lie inside a bumper more than 3 hops away; 33 of 292 bumpers affected; worst cone[M_lower_r4, L_lower_r4] 100.0% into sphere[L_glute_1]
+  [PASS] animation/binding-as-intended        every one of 96 spheres binds to the joint it was placed for
+  [FAIL] animation/one-bone-per-cone          114 of 170 rim edges stay on one bone; 55 cross a chain seam (parent-child, or two trunk joints; allowed); 1 span unrelated joints: cone[M_crotch_r0, R_thigh_0] spans L_hip / R_hip
+  [FAIL] animation/posed-protrusion           over 54 poses the collider pokes at worst 30.8 mm through the skin (pose 19); mean over poses 22.5 mm
+  [FAIL] animation/posed-protrusion-fraction  worst pose has 6.14% of sampled vertices inside the collider
+
+  10/18 checks passed  (8 FAILED)
+
+walk hop histogram   {"0": 7142, "1": 1483, "2": 1789, "3": 121, ">3": 231, "unreachable": 0}
+
+  region        verts     rms      gap    protr  walkbrk
+  R_shoulder      272    14.6     30.0      1.9    3.68%
+  L_shoulder      271    14.4     30.1      3.2    3.69%
+  L_collar        116    12.5     26.8      2.0   10.34%
+  R_collar        114    11.3     24.7      3.5   10.53%
+  spine3          606     9.8     29.0      1.9    3.47%
+  R_elbow         230     8.7     31.6      1.2    0.00%
+  L_elbow         229     8.3     31.6      2.2    0.00%
+  pelvis          400     7.7     25.9      2.5   17.25%
+  L_hip           233     7.7     22.2      3.6   24.03%
+  L_knee          199     7.3     18.4      2.0    5.03%
+  R_knee          199     7.0     22.5      3.6    5.03%
+  spine2          197     6.5     13.9      2.0    0.00%
+  R_hip           239     6.1     16.1      5.4    8.37%
+  neck            102     5.2     15.1      1.8   23.53%
+  spine1          199     4.1     10.8      2.7    0.00%
+
+gap clusters (7 of >= 5 vertices, largest 8 shown):
+  verts   worst joint        facing centroid (m)             bbox (m)                                         owner
+    160   30.0mm R_shoulder   right  (-0.215, +0.171, -0.032) (-0.323, +0.082, -0.091) .. (-0.149, +0.287, +0.079) cone[R_fill_1, R_fill_5]
+    154   30.1mm L_shoulder   left   (+0.212, +0.175, -0.038) (+0.152, +0.094, -0.096) .. (+0.323, +0.285, +0.080) cone[L_upperarm_0, L_upperarm_1]
+     36   25.9mm pelvis       front  (+0.006, -0.351, +0.136) (-0.028, -0.410, +0.091) .. (+0.057, -0.307, +0.153) cone[R_thigh_0, M_fill_0]
+     26   24.1mm L_shoulder   down   (+0.430, +0.201, -0.041) (+0.412, +0.179, -0.073) .. (+0.455, +0.238, +0.009) cone[L_upperarm_3, L_forearm_0]
+     25   23.4mm R_shoulder   down   (-0.430, +0.205, -0.041) (-0.455, +0.180, -0.074) .. (-0.413, +0.252, +0.009) cone[R_upperarm_3, R_forearm_0]
+     18   31.6mm R_elbow      up     (-0.476, +0.269, -0.025) (-0.511, +0.242, -0.050) .. (-0.438, +0.279, +0.002) cone[R_upperarm_3, R_forearm_0]
+     17   31.6mm L_elbow      up     (+0.479, +0.269, -0.021) (+0.438, +0.242, -0.046) .. (+0.512, +0.279, +0.002) cone[L_forearm_0, L_forearm_1]
+
+protrusion clusters: none
+
+worst walk breaks:
+  cone[L_upper_r0, L_deltoid_0] <-> cone[L_upperarm_0, L_fill_1]  x12
+  cone[M_upper_r2, neck_1] <-> cone[L_upper_r2, neck_0]  x11
+  cone[M_crotch_r0, R_thigh_0] <-> cone[R_glute_0, R_thigh_1]  x11
+  cone[M_upper_r2, neck_1] <-> cone[neck_0, R_upper_r2]  x11
+  cone[R_upper_r0, R_deltoid_0] <-> cone[R_upperarm_0, R_clavicle_0]  x9
+  sphere[L_glute_0] <-> sphere[L_thigh_1]  x7
+  cone[L_upperarm_0, L_upperarm_1] <-> cone[L_deltoid_0, L_fill_5]  x7
+  cone[L_upperarm_0, L_fill_1] <-> cone[L_deltoid_0, L_fill_5]  x7
+  cone[R_upper_r0, R_deltoid_0] <-> cone[R_fill_1, R_fill_5]  x7
+  cone[L_shin_0, L_shin_1] <-> cone[L_fill_4, L_fill_7]  x6
+
+worst harmful overlaps (share of a bumper's exposed surface swallowed by a bumper beyond the walk radius):
+  cone[M_lower_r4, L_lower_r4]: 100.0% (5 of 5 samples), mostly into sphere[L_glute_1]
+  cone[M_lower_r4, M_crotch_r0]: 100.0% (4 of 4 samples), mostly into cone[L_glute_0, L_glute_1]
+  cone[R_clavicle_0, R_fill_5]: 100.0% (2 of 2 samples), mostly into cone[R_upper_r0, R_deltoid_0]
+  cone[L_hip_1, L_glute_1]: 100.0% (1 of 1 samples), mostly into cone[L_lower_r4, L_glute_0]
+  cone[M_lower_r4, R_lower_r4]:  83.3% (5 of 6 samples), mostly into cone[R_thigh_0, M_fill_0]
+  cone[L_lower_r4, M_fill_0]:  81.8% (9 of 11 samples), mostly into sphere[L_thigh_0]
+  cone[M_crotch_r0, R_thigh_0]:  75.0% (3 of 4 samples), mostly into cone[R_glute_0, R_thigh_1]
+  cone[L_deltoid_0, L_fill_5]:  54.5% (12 of 22 samples), mostly into cone[L_upperarm_0, L_fill_1]
+  cone[L_glute_1, L_glute_2]:  48.5% (16 of 33 samples), mostly into sphere[L_lower_r4]
+  sphere[L_glute_1]:  44.4% (4 of 9 samples), mostly into sphere[R_glute_1]
+
+most buried connections (share of surface inside any other bumper):
+  cone[M_lower_r0, M_upper_r0]: 100.0%
+  cone[M_lower_r1, L_lower_r1]: 100.0%
+  cone[M_lower_r4, L_lower_r4]: 100.0%
+  cone[M_lower_r4, M_crotch_r0]: 100.0%
+  cone[M_lower_r4, L_hip_0]: 100.0%
+
+joint-crossing cones: 1 across unrelated joints, 55 on chain seams
+  FAIL cone[M_crotch_r0, R_thigh_0] spans L_hip / R_hip
+  seam cone[M_lower_r0, L_lower_r0] spans spine2 / spine3
+  seam cone[M_lower_r0, M_lower_r1] spans spine2 / spine1
+  seam cone[M_lower_r0, M_upper_r0] spans spine2 / spine3
+  seam cone[M_lower_r0, R_lower_r0] spans spine2 / spine3
+  seam cone[L_lower_r0, L_lower_r1] spans spine3 / spine1
+  seam cone[M_lower_r2, M_lower_r3] spans spine1 / pelvis
+  seam cone[L_lower_r2, L_lower_r3] spans spine1 / pelvis
+  seam cone[M_lower_r4, M_crotch_r0] spans pelvis / L_hip
+  seam cone[L_lower_r4, L_glute_0] spans pelvis / L_hip
+  seam cone[L_upper_r0, L_deltoid_0] spans spine3 / L_collar
+  seam cone[L_upper_r0, L_clavicle_0] spans spine3 / L_collar
+  seam cone[L_upper_r0, L_fill_1] spans spine3 / L_collar
+  ... 43 more seams
+
+worst poses:
+  pose  19  protrusion   30.8 mm ( 6.14% of verts), gap   28.5 mm
+  pose  12  protrusion   28.5 mm ( 4.15% of verts), gap   28.2 mm
+  pose  45  protrusion   28.4 mm ( 2.74% of verts), gap   24.2 mm
+  pose  13  protrusion   27.5 mm ( 4.15% of verts), gap   28.3 mm
+  pose  10  protrusion   27.5 mm ( 3.57% of verts), gap   29.7 mm
+  pose   7  protrusion   26.8 mm ( 1.99% of verts), gap   26.1 mm
+
+walk links added:
+  cone[neck_1, M_upper_r2]  removed 18 expensive steps, protrusion 4.8 mm
+  cone[R_upperarm_0, R_clavicle_0]  removed 9 expensive steps, protrusion 8.0 mm
+  cone[L_lower_r4, L_glute_0]  removed 25 expensive steps, protrusion 4.8 mm
+  cone[M_fill_0, R_thigh_0]  removed 25 expensive steps, protrusion 10.0 mm
+  cone[L_thigh_4, L_fill_2]  removed 14 expensive steps, protrusion 3.8 mm
+  cone[R_clavicle_0, R_fill_5]  removed 10 expensive steps, protrusion 5.7 mm
+  cone[R_upperarm_1, R_fill_5]  removed 13 expensive steps, protrusion 2.9 mm
+  cone[L_fill_1, L_upperarm_0]  removed 38 expensive steps, protrusion 0.0 mm
+  cone[R_glute_0, R_thigh_1]  removed 14 expensive steps, protrusion 3.4 mm
+  cone[R_fill_1, R_fill_5]  removed 11 expensive steps, protrusion 0.0 mm
+  cone[L_fill_0, L_thigh_2]  removed 20 expensive steps, protrusion 1.3 mm
+
+gap fills added:
+  M_fill_0     r= 69.4 mm  pelvis     cluster L_hip x96 (worst 40.2 mm)  links [('M_lower_r4', 5.9), ('L_lower_r4', 0.0)]
+  L_fill_0     r= 82.0 mm  L_hip      cluster L_hip x58 (worst 22.3 mm)  links [('L_thigh_1', 3.3), ('L_thigh_0', 0.0)]
+  L_fill_1     r= 51.7 mm  L_collar   cluster spine3 x42 (worst 24.6 mm)  links [('L_clavicle_0', 3.3), ('L_upper_r0', 4.7)]
+  L_fill_2     r= 66.1 mm  L_hip      cluster L_hip x42 (worst 21.2 mm)  links [('L_thigh_3', 0.9), ('L_thigh_2', 0.3)]
+  L_fill_3     r= 89.9 mm  spine3     cluster spine3 x28 (worst 16.5 mm)  links [('L_lower_r0', 1.4), ('L_upper_r0', 0.6)]
+  L_fill_4     r= 36.9 mm  L_knee     cluster L_knee x21 (worst 20.0 mm)  links [('L_shin_0', 0.5), ('L_thigh_4', 3.6)]
+  L_fill_5     r= 50.8 mm  L_shoulder cluster L_shoulder x10 (worst 16.8 mm)  links [('L_upperarm_0', 1.1), ('L_deltoid_0', 0.0)]
+  L_fill_6     r= 60.5 mm  L_hip      cluster L_hip x10 (worst 18.6 mm)  links [('L_thigh_3', 0.1), ('L_fill_2', 0.8)]
+  L_fill_7     r= 52.9 mm  L_knee     cluster L_knee x13 (worst 16.2 mm)  links [('L_shin_0', 0.0), ('L_fill_4', 3.2)]
+
+timings (s): {"place": 1.7, "quick_fit": 6.8, "link": 2.8, "fill": 79.0, "link_2": 7.7, "full_fit": 578.3, "link_3": 269.2, "validate": 12.2}

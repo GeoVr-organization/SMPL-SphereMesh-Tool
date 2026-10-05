@@ -1,0 +1,73 @@
+topology  auto_female  (female)
+spec      79 spheres (L_arm 10, L_leg 15, R_arm 10, R_leg 15, neck 2, trunk 27); 67 doubles, 14 triples, 12 quads
+
+  [PASS] budget/spheres                       79 spheres (limit 99)
+  [PASS] budget/triangles                     14 three-sphere connections (limit 20)
+  [PASS] budget/quads                         12 four-sphere connections (limit 40)
+  [PASS] graph/spheres-connected              1 component(s)
+  [PASS] graph/bumpers-connected              1 component(s) over 225 bumpers (79 spheres, 120 cones, 14 prysmoids, 12 quads)
+  [FAIL] graph/no-degenerate-primitives       4: quad[6, 7, 9, 8]: triangle (6, 9, 8) admits no tangent plane -- its centres are near-collinear or its radii vary faster than their spacing, so the slab has no flat face; prysmoid[29, 13, 15]: triangle (29, 13, 15) admits no tangent plane -- its centres are near-collinear or its radii vary faster than their spacing, so the slab has no flat face; quad[6, 48, 49, 8]: triangle (6, 49, 8) admits no tangent plane -- its centres are near-collinear or its radii vary faster than their spacing, so the slab has no flat face
+  [PASS] geometry/mirror-symmetric            every sphere has an x-mirror twin
+  [FAIL] fidelity/max-gap                     worst gap 32.9 mm, 3.93% of vertices over 15 mm (RMS 7.3 mm)
+  [FAIL] fidelity/gap-fraction                3.93% of modelled vertices sit further than 15 mm from the collider
+  [FAIL] fidelity/max-protrusion              collider pokes 41.5 mm through the skin at worst, 6.62% of vertices affected
+  [FAIL] fidelity/protrusion-fraction         6.62% of modelled vertices are inside the collider by more than 5 mm
+  [FAIL] watchdog/walk-break-rate             268 of 10830 surface steps (2.47%) need more than 3 hops (0 unreachable at all); mean walk 0.58 hops; worst cone[53, 54]<->cone[62, 63] x29 / cone[19, 20]<->cone[28, 29] x25 / sphere[45]<->sphere[63] x17
+  [PASS] watchdog/no-wasteful-connections     every connection either owns surface or shortens the walk (20 more own nothing but keep the walk short; 32 spheres are buried inside their own cones, which is expected along a chain)
+  [FAIL] watchdog/non-adjacent-overlap        worst unlinked interpenetration 100.0% (sphere[33] into quad[6, 7, 9, 8]); 4139 unlinked pairs touch at all
+  [FAIL] animation/posed-protrusion           over 54 poses the collider pokes at worst 46.8 mm through the skin (pose 52); mean over poses 40.6 mm
+  [FAIL] animation/posed-protrusion-fraction  worst pose has 18.71% of sampled vertices inside the collider
+
+  7/16 checks passed  (9 FAILED)
+
+walk hop histogram   {"0": 7404, "1": 1408, "2": 1644, "3": 106, ">3": 268, "unreachable": 0}
+
+  region        verts     rms      gap    protr  walkbrk
+  L_ankle          11    18.5     30.0    -10.0    0.00%
+  spine1          200     9.8     11.4     38.6    0.00%
+  spine2          196     9.1     21.6     10.8    0.00%
+  L_hip           238     8.9     10.8     41.5   10.92%
+  spine3          612     8.5     22.2     12.3    8.01%
+  pelvis          399     8.4     20.8     33.9   23.31%
+  R_hip           234     8.1     11.2     40.8   14.53%
+  R_shoulder      272     7.3     26.6      4.4    9.56%
+  L_collar        114     6.0     14.1      5.1    0.88%
+  R_collar        113     5.8     14.8      8.9    1.77%
+  L_shoulder      271     5.5     22.9      4.1    6.64%
+  neck            112     4.3     11.8     10.9   12.50%
+  R_knee          199     3.6     13.8      7.0    0.00%
+  L_elbow         225     3.5     12.0      5.6    0.00%
+  R_elbow         230     3.5      9.5      4.9    0.00%
+  L_knee          199     3.4     12.8      8.3    0.00%
+
+worst walk breaks:
+  cone[53, 54] <-> cone[62, 63]  x29
+  cone[19, 20] <-> cone[28, 29]  x25
+  sphere[45] <-> sphere[63]  x17
+  cone[16, 35] <-> cone[36, 37]  x15
+  sphere[1] <-> sphere[29]  x14
+  cone[12, 14] <-> cone[17, 18]  x9
+  sphere[32] <-> sphere[9]  x9
+  sphere[49] <-> sphere[66]  x8
+  quad[6, 7, 9, 8] <-> sphere[34]  x7
+  sphere[32] <-> sphere[66]  x7
+
+worst unlinked overlaps:
+  sphere[33] into quad[6, 7, 9, 8]: 100.0%
+  sphere[67] into quad[6, 48, 49, 8]: 100.0%
+  cone[8, 34] into cone[9, 30]: 100.0%
+  cone[8, 34] into cone[9, 31]: 100.0%
+  cone[8, 34] into prysmoid[30, 9, 7]: 100.0%
+  cone[8, 68] into cone[48, 49]: 100.0%
+  cone[8, 68] into cone[49, 64]: 100.0%
+  cone[8, 68] into cone[49, 65]: 100.0%
+  cone[8, 68] into prysmoid[64, 49, 48]: 100.0%
+  cone[33, 34] into quad[6, 7, 9, 8]: 100.0%
+
+worst poses:
+  pose  52  protrusion   46.8 mm (15.09% of verts), gap   29.1 mm
+  pose  53  protrusion   46.7 mm (14.18% of verts), gap   29.1 mm
+  pose  19  protrusion   46.5 mm (18.71% of verts), gap   31.6 mm
+  pose  51  protrusion   46.1 mm (15.00% of verts), gap   29.1 mm
+  pose  40  protrusion   44.8 mm (13.85% of verts), gap   29.5 mm
+  pose  50  protrusion   44.7 mm (14.59% of verts), gap   29.1 mm

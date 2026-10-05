@@ -1,5 +1,8 @@
 """Convert SMPL20-style SphereMeshTool text back to JSON (inverse of json2txt.py).
 
+Example usage (from the repo root):
+    .venv/Scripts/python.exe scripts/txt2json.py data/generated/auto_male.txt
+
 Input format (same as json2txt output):
 1) title line (ignored for JSON; not stored)
 2) "<num_spheres> <num_triples> <num_doubles> <num_quadruples>"
@@ -8,11 +11,16 @@ Input format (same as json2txt output):
 
 Sphere fields not present in the text file use the same defaults as
 ``ManagedSphere`` / ``SphereManager.load_from_json`` when keys are missing:
-``parent_joint``, ``rest_offset``, ``rest_radius``, ``nearest_vertex_index`` → null;
-``locked`` → false.
+``parent_joint``, ``rest_offset``, ``rest_radius``, ``nearest_vertex_index`` -> null;
+``locked`` -> false. The tool then binds every sphere to a joint on load.
 
-Note: SphereMeshTool's in-app loader currently accepts only 2- or 3-index
-connections; quadruple lines are still written to JSON with a warning.
+Quads
+-----
+SphereMeshTool's loader accepts only 2- or 3-index connections, so each quad
+``(a, b, c, d)`` in the text is written as its two split triangles ``(a, b, c)`` and
+``(a, c, d)`` (the 0-2 diagonal, as ``src.topology.export.split_quads`` does) and the
+original grouping is recorded under ``quad_groups``. The tool can open the result, and
+``json2txt.py`` reverses the split from ``quad_groups`` so txt -> json -> txt is lossless.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ import warnings
 from pathlib import Path
 
 # Keep in sync with src/sphere_manager.py JSON_VERSION
-JSON_VERSION = 1
+JSON_VERSION = 2
 
 SPHERE_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TXT = SPHERE_ROOT / "data" / "save1.txt"
@@ -35,16 +43,16 @@ def _parse_header_line(line: str) -> tuple[int, int, int, int]:
         raise ValueError(
             f"Expected 4 integers on counts line (spheres triples doubles quads), got: {line!r}"
         )
-    a, b, c, d = (int(x) for x in parts)
-    return a, b, c, d
+    num_spheres, num_triples, num_doubles, num_quads = (int(part) for part in parts)
+    return num_spheres, num_triples, num_doubles, num_quads
 
 
 def _parse_sphere_line(line: str, idx: int) -> tuple[float, float, float, float]:
     parts = line.split()
     if len(parts) != 4:
         raise ValueError(f"sphere line {idx}: expected 4 numbers, got {line!r}")
-    x, y, z, r = (float(t) for t in parts)
-    return x, y, z, r
+    x, y, z, radius = (float(part) for part in parts)
+    return x, y, z, radius
 
 
 def _parse_connection_line(line: str, expected_len: int, idx: int) -> list[int]:
@@ -53,21 +61,21 @@ def _parse_connection_line(line: str, expected_len: int, idx: int) -> list[int]:
         raise ValueError(
             f"connection line {idx}: expected {expected_len} indices, got {len(parts)} in {line!r}"
         )
-    out: list[int] = []
-    for p in parts:
-        if "." in p:
-            raise ValueError(f"connection line {idx}: index must be integer, got {p!r}")
-        out.append(int(p))
-    return out
+    indices: list[int] = []
+    for part in parts:
+        if "." in part:
+            raise ValueError(f"connection line {idx}: index must be integer, got {part!r}")
+        indices.append(int(part))
+    return indices
 
 
 def _validate_connection(indices: list[int], sphere_count: int, label: str) -> None:
     if len(set(indices)) != len(indices):
         raise ValueError(f"{label}: duplicate sphere index in {indices}")
-    for j, v in enumerate(indices):
-        if v < 0 or v >= sphere_count:
+    for position, sphere_index in enumerate(indices):
+        if sphere_index < 0 or sphere_index >= sphere_count:
             raise ValueError(
-                f"{label}: indices[{j}]={v} out of range [0, {sphere_count - 1}]"
+                f"{label}: indices[{position}]={sphere_index} out of range [0, {sphere_count - 1}]"
             )
 
 
@@ -86,11 +94,11 @@ def convert_text_to_json_dict(lines: list[str]) -> dict:
     spheres_out: list[dict] = []
     offset = 2
     for i in range(n_spheres):
-        x, y, z, r = _parse_sphere_line(lines[offset + i], i)
+        x, y, z, radius = _parse_sphere_line(lines[offset + i], i)
         spheres_out.append(
             {
                 "center": [x, y, z],
-                "radius": r,
+                "radius": radius,
                 "parent_joint": None,
                 "rest_offset": None,
                 "rest_radius": None,
@@ -102,29 +110,27 @@ def convert_text_to_json_dict(lines: list[str]) -> dict:
 
     connections_out: list[dict] = []
     for i in range(n_triples):
-        idxs = _parse_connection_line(lines[offset + i], 3, i)
-        _validate_connection(idxs, n_spheres, f"triple[{i}]")
-        connections_out.append({"indices": idxs})
+        indices = _parse_connection_line(lines[offset + i], 3, i)
+        _validate_connection(indices, n_spheres, f"triple[{i}]")
+        connections_out.append({"indices": indices})
     offset += n_triples
 
     for i in range(n_doubles):
-        idxs = _parse_connection_line(lines[offset + i], 2, i)
-        _validate_connection(idxs, n_spheres, f"double[{i}]")
-        connections_out.append({"indices": idxs})
+        indices = _parse_connection_line(lines[offset + i], 2, i)
+        _validate_connection(indices, n_spheres, f"double[{i}]")
+        connections_out.append({"indices": indices})
     offset += n_doubles
 
+    quad_groups_out: list[list[int]] = []
     for i in range(n_quads):
-        idxs = _parse_connection_line(lines[offset + i], 4, i)
-        _validate_connection(idxs, n_spheres, f"quad[{i}]")
-        connections_out.append({"indices": idxs})
-
-    if n_quads > 0:
-        warnings.warn(
-            "Text contains quadruple connections; JSON will include them, but "
-            "SphereMeshTool.load_from_json currently only loads 2- or 3-index connections.",
-            UserWarning,
-            stacklevel=2,
-        )
+        indices = _parse_connection_line(lines[offset + i], 4, i)
+        _validate_connection(indices, n_spheres, f"quad[{i}]")
+        first, second, third, fourth = indices
+        # Split across the 0-2 diagonal, matching src.topology.export.split_quads, so the
+        # tool can load the file and json2txt.py can rebuild the quad from quad_groups.
+        connections_out.append({"indices": [first, second, third]})
+        connections_out.append({"indices": [first, third, fourth]})
+        quad_groups_out.append(indices)
 
     trailing = lines[offset + n_quads :]
     if any(line.strip() for line in trailing):
@@ -134,15 +140,18 @@ def convert_text_to_json_dict(lines: list[str]) -> dict:
             stacklevel=2,
         )
 
-    return {
+    payload = {
         "version": JSON_VERSION,
         "spheres": spheres_out,
         "connections": connections_out,
     }
+    if quad_groups_out:
+        payload["quad_groups"] = quad_groups_out
+    return payload
 
 
 def convert_text_to_json_payload(text: str) -> dict:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip() != ""]
+    lines = [line.strip() for line in text.splitlines() if line.strip() != ""]
     return convert_text_to_json_dict(lines)
 
 
@@ -180,10 +189,14 @@ def main() -> None:
         json.dump(payload, f, indent=2)
         f.write("\n")
 
-    nsp = len(payload["spheres"])
-    nconn = len(payload["connections"])
+    num_spheres = len(payload["spheres"])
+    num_connections = len(payload["connections"])
+    num_quads = len(payload.get("quad_groups", []))
     print(f"Wrote {output_path}")
-    print(f"Spheres: {nsp}, connections: {nconn}")
+    print(
+        f"Spheres: {num_spheres}, connections: {num_connections} "
+        f"(of which {2 * num_quads} are split triangles of {num_quads} quads)"
+    )
 
 
 if __name__ == "__main__":
