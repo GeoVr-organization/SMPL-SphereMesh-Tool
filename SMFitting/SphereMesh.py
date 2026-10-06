@@ -104,6 +104,20 @@ class SphereMesh:
                 SphereMesh.Capsuloid(self.spheres[indexA],
                                      self.spheres[indexB]))
 
+    def saveToFile(self, filename: str) -> None:
+        """Write the mesh to a text file in the "Sphere Mesh 2.0" format."""
+        with open(filename, "w") as file:
+            file.write("Sphere Mesh 2.0\n")
+            file.write(f"{len(self.spheres)} {len(self.prysmoids)} {len(self.capsuloids)} 0\n")
+            for sphere in self.spheres:
+                file.write(f"{sphere.center[0]} {sphere.center[1]} {sphere.center[2]} {sphere.radius}\n")
+            for prysmoid in self.prysmoids:
+                file.write(f"{prysmoid.sA.index} {prysmoid.sB.index} {prysmoid.sC.index}\n")
+            for capsuloid in self.capsuloids:
+                file.write(f"{capsuloid.sA.index} {capsuloid.sB.index}\n")
+
+            
+
     def rotate (self, rotationMatrix: np.ndarray) -> None:
         """Rotate the mesh about the origin by a 3x3 rotation matrix.
 
@@ -140,9 +154,9 @@ class SphereMesh:
         prysmoid, summing to 1 in both cases.
 
         The constituent spheres are not candidates in their own right - one
-        only shows up through the primitives it belongs to. A prysmoid whose
-        surface faces away reports an infinite distance, so a mesh with no
-        primitives, or none facing the point, gives back (None, []).
+        only shows up through the primitives it belongs to. A prysmoid answers
+        from whichever of its two faces the point is on, so only a mesh with
+        no primitives gives back (None, []).
         """
         queryPoint = vec3(point)
 
@@ -151,7 +165,7 @@ class SphereMesh:
         nearestPrimitive = None
         nearestDistance = float('inf')
         for primitive in [*self.capsuloids, *self.prysmoids]:
-            distance = abs(primitive.signedDistance(queryPoint))
+            distance = primitive.signedDistance(queryPoint)
             isNearest = distance < nearestDistance
 
             if isNearest:
@@ -475,6 +489,22 @@ class SphereMesh:
                       self.upperPlane.normal) * direction,
                 self.sA.center)
 
+            # The same side planes for the lower face. lowerPlane was solved
+            # with -direction, so the sign flips too and they still face in.
+            lowerDirection = -direction
+            self.lowerM0: SphereMesh.Prysmoid.Plane = Plane(
+                cross(self.sB.center - self.sC.center,
+                      self.lowerPlane.normal) * lowerDirection,
+                self.sB.center)
+            self.lowerM1: SphereMesh.Prysmoid.Plane = Plane(
+                cross(self.sC.center - self.sA.center,
+                      self.lowerPlane.normal) * lowerDirection,
+                self.sC.center)
+            self.lowerM2: SphereMesh.Prysmoid.Plane = Plane(
+                cross(self.sA.center - self.sB.center,
+                      self.lowerPlane.normal) * lowerDirection,
+                self.sA.center)
+
         @staticmethod
         def computeUpperPlane(sA: "SphereMesh.Sphere", sB: "SphereMesh.Sphere",
                               sC: "SphereMesh.Sphere",
@@ -509,31 +539,44 @@ class SphereMesh:
             print("Warning: Degenerate prysmoid (Normal diverged)", file=sys.stderr)
             return Plane(normal, offsetA)
 
+        def faceAt(self, point: Vec3) -> tuple["SphereMesh.Prysmoid.Plane",
+                                                tuple["SphereMesh.Prysmoid.Plane", ...]]:
+            """The tangent plane facing point, and its side planes in m1, m2, m0 order.
+
+            Which face counts as upper depends only on the sphere index order,
+            so a point behind the midplane is answered by the lower face rather
+            than dropped; measured against upperPlane it would come out deeply
+            negative and win every nearest-primitive comparison.
+            """
+            if self.midplane.isBehind(point):
+                return self.lowerPlane, (self.lowerM1, self.lowerM2, self.lowerM0)
+            return self.upperPlane, (self.m1, self.m2, self.m0)
+
         def edgeCapsuloidAt(self, point: Vec3) -> "SphereMesh.Capsuloid | None":
             """The edge capsuloid owning this point, or None for the face.
 
-            Past one of the three side planes the nearest surface is an edge of
-            the prysmoid rather than its tangent plane, and that edge is the
-            capsuloid over the two spheres it joins. The tests run in the order
-            m1, m2, m0, which is the order every caller below relies on.
+            Past one of the three side planes of the face facing the point, the
+            nearest surface is an edge of the prysmoid rather than its tangent
+            plane, and that edge is the capsuloid over the two spheres it joins.
+            The tests run in the order m1, m2, m0, which is the order every
+            caller below relies on.
             """
-            if self.m1.isBehind(point):
+            _, (sideAC, sideAB, sideBC) = self.faceAt(point)
+            if sideAC.isBehind(point):
                 return SphereMesh.Capsuloid(self.sA, self.sC)
-            if self.m2.isBehind(point):
+            if sideAB.isBehind(point):
                 return SphereMesh.Capsuloid(self.sA, self.sB)
-            if self.m0.isBehind(point):
+            if sideBC.isBehind(point):
                 return SphereMesh.Capsuloid(self.sB, self.sC)
             return None
 
         def signedDistance(self, point: Vec3) -> float:
-            #if self.midplane.isBehind(point):
-             #   return float('inf')
-
             edgeCapsuloid = self.edgeCapsuloidAt(point)
             if edgeCapsuloid is not None:
                 return edgeCapsuloid.signedDistance(point)
 
-            return self.upperPlane.signedDistance(point)
+            tangentPlane, _ = self.faceAt(point)
+            return tangentPlane.signedDistance(point)
 
         def closestSphereWithContributions(
                 self, point: Vec3
@@ -544,14 +587,9 @@ class SphereMesh:
             the triangle of the three centres - the very weights closestSphere
             interpolates the radius with. Past one of the sides it is whatever
             the owning edge capsuloid reports, over that edge's two spheres.
-            Behind the midplane the prysmoid presents no surface to the point,
-            so there is nothing to interpolate and the contributions are empty.
             """
-           
-
             edgeCapsuloid = self.edgeCapsuloidAt(point)
             if edgeCapsuloid is not None:
-                
                 return edgeCapsuloid.closestSphereWithContributions(point)
 
             closest, barycentricCoords = self.closestSphereOnFace(point)
@@ -561,9 +599,6 @@ class SphereMesh:
                              (self.sC.index, barycentricCoords[2])]
 
         def closestSphere(self, point: Vec3) -> tuple["SphereMesh.Sphere", float]:
-            #if self.midplane.isBehind(point):
-                #return SphereMesh.Sphere(-1, point, 0.0), 0.0
-
             edgeCapsuloid = self.edgeCapsuloidAt(point)
             if edgeCapsuloid is not None:
                 return edgeCapsuloid.closestSphere(point)
@@ -577,24 +612,28 @@ class SphereMesh:
             """The sphere the tangent face puts closest to point, and the
             barycentric coordinates its radius is blended from.
 
-            Only meaningful in front of the midplane and inside all three side
-            planes; both callers above settle that first. They share this so
+            Only meaningful inside all three side planes of the face facing the
+            point; both callers above settle that first. They share this so
             the coordinates come straight out of the construction instead of
             being read back off the sphere it returns.
             """
-            #closest point on the upper plane
-            distance = self.upperPlane.signedDistance(point)
-            closestPoint = point - distance * self.upperPlane.normal
+            tangentPlane, _ = self.faceAt(point)
 
-            #project closest point onto middle plane along the direction of the upper plane normal
+            #closest point on the tangent plane
+            distance = tangentPlane.signedDistance(point)
+            closestPoint = point - distance * tangentPlane.normal
+
+            #project closest point onto middle plane along the direction of the tangent plane normal
             midplaneDistance = self.midplane.signedDistance(closestPoint)
             # midplaneDistance is measured along midplane.normal, but the step is
-            # taken along upperPlane.normal, which is tilted from it; dividing by
-            # the cosine of that tilt makes the step land exactly on the midplane.
-            cosTilt = float(dot(self.upperPlane.normal, self.midplane.normal))
+            # taken along tangentPlane.normal, which is tilted from it; dividing
+            # by the cosine of that tilt makes the step land exactly on the
+            # midplane. For the lower face the cosine is negative, which flips
+            # the step to match.
+            cosTilt = float(dot(tangentPlane.normal, self.midplane.normal))
             closestPointOnMidplane = (closestPoint
                                       - (midplaneDistance / cosTilt)
-                                      * self.upperPlane.normal)
+                                      * tangentPlane.normal)
             #triangular interpolation of the radius based on the barycentric coordinates of the closest point on the midplane
             barycentricCoords = self.computeBarycentricCoordinates(closestPointOnMidplane)
             radius = (barycentricCoords[0] * self.sA.radius +

@@ -24,10 +24,11 @@ for vertexIndex, vertex in enumerate(meshVertices):
     signedDistances[vertexIndex] = closest.signedDistance(vertex) if contributions else np.nan
     contributionsPerVertex.append([(int(sphereIndex), float(weight)) for sphereIndex, weight in contributions])
 
-    # Re-run the argmin to know *which* primitive answered.
+    # Re-run the argmin to know *which* primitive answered, with the same
+    # abs() rule SphereMesh.closestSphere() uses.
     bestDistance, bestPrimitive = float("inf"), None
     for primitive in [*sphereMesh.capsuloids, *sphereMesh.prysmoids]:
-        distance = primitive.signedDistance(vertex)
+        distance = abs(primitive.signedDistance(vertex))
         if distance < bestDistance:
             bestDistance, bestPrimitive = distance, primitive
     winningPrimitiveDescriptions.append(describe(bestPrimitive))

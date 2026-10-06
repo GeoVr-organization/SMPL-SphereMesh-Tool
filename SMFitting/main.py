@@ -11,6 +11,9 @@
 # # numTheta/numPhi and ~40 MB at their maximum, past marimo's 8 MB default.
 # [tool.marimo.runtime]
 # output_max_bytes = 50_000_000
+# # Saving SphereMesh.py, ObjMesh.py or PlotlyView.py reloads the module and
+# # re-runs the cells that use it, in the editor only (marimo run ignores it).
+# auto_reload = "autorun"
 # ///
 
 import marimo
@@ -22,16 +25,24 @@ app = marimo.App(width="medium")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # SphereMesh `buildGeometry` test
+    # SphereMesh fitting
 
-    Three sphere meshes, one per primitive type:
+    Fits a sphere mesh to the surface it was built for, with one regularized
+    least-squares solve of the tangency condition, and measures how close the
+    result gets:
 
-    1. **one sphere** — a single `Sphere`
-    2. **one capsuloid** — two spheres + the `Capsuloid` joining them
-    3. **one prysmoid** — three spheres + the `Prysmoid` spanning them
+    - **4** — pick a sphere mesh
+    - **5–7** — the input sphere mesh inside its surface, the signed distance
+      of every surface vertex to it, and that distance as a heatmap
+    - **8–9** — the linear system, its solution, and the sphere mesh rebuilt
+      from it
+    - **10–11** — the fitted sphere mesh inside its surface, and its heatmap
+    - **after 11** — diagnostics (the matrix, its empty columns, distance
+      statistics, the vertices whose normal disagrees with their closest
+      sphere) and the save to `fitted_<name>.txt`
 
-    Each primitive's `buildGeometry(numTheta, numPhi)` output is rendered
-    directly, so whatever the function returns is what you see.
+    Sections 1–3, one sphere, one capsuloid and one prysmoid on their own, are
+    in `SMClasstest.py`.
 
     The plots are interactive: drag to orbit, scroll to zoom, right-drag to
     pan, and click a legend entry to hide that primitive.
@@ -57,31 +68,62 @@ def _():
         sys.path.insert(0, str(notebookDirectory))
 
     from SphereMesh import SphereMesh
+    from ObjMesh import DistanceHeatmapSurface, ObjSurface, loadObjMesh
+    from PlotlyView import HighlightedSphere, MergedSpheres, renderPrimitives
     from scipy.sparse import lil_matrix
     import scipy.sparse.linalg as spla
     from scipy.sparse import vstack, diags
 
 
-    return SphereMesh, diags, go, lil_matrix, mo, np, pd, plt, spla, vstack
+    return (
+        DistanceHeatmapSurface,
+        HighlightedSphere,
+        MergedSpheres,
+        ObjSurface,
+        Path,
+        SphereMesh,
+        diags,
+        go,
+        lil_matrix,
+        loadObjMesh,
+        mo,
+        np,
+        pd,
+        plt,
+        renderPrimitives,
+        spla,
+        vstack,
+    )
 
 
 @app.cell
-def _():
+def _(Path):
     # Every example file the notebook reads, keyed by the mesh names that the
     # section 4 dropdown and fittedMesh of section 5 use.
     sphereMeshPathsByMeshName = {
         "bunny": "examples/bunny.txt",  # TODO da rifare il file bunny.txt
         "smpl_arm": "examples/arm2.txt",
         #"smpl": "examples/smol_star.txt",
-        "smpl": "examples/SMPL_male_star.txt",
-    
+        #"smpl": "examples/SMPL_male_star.txt",
+        #"smpl": "examples/new_wp.txt",
+        "smpl": "examples/fitted_smpl.txt",
+
     }
     # The surface each sphere mesh was fitted to, shown from section 5 on.
     objPathsByMeshName = {
         "smpl_arm": "examples/arm.obj",
         #"smpl": "examples/SMPL_male.obj",
-        "smpl": "examples/SMPL_starpose.obj",
+        "smpl": "examples/SMPL_starpose_NOcrotch.obj",
     }
+
+    #quick check if the files exist
+    for meshName, path in sphereMeshPathsByMeshName.items():
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Sphere mesh file for {meshName} not found at {path}")
+
+    for objName, path in objPathsByMeshName.items():
+        if not Path(path).exists():
+            raise FileNotFoundError(f"OBJ file for {objName} not found at {path}")
     return objPathsByMeshName, sphereMeshPathsByMeshName
 
 
@@ -111,583 +153,9 @@ def _(mo):
         numPhiSlider,
         numThetaSlider,
         opacitySlider,
-        showAxesCheckbox,
         showSpheresCheckbox,
         showWireframeCheckbox,
     )
-
-
-@app.cell(hide_code=True)
-def _(go, np):
-    # Colour per primitive type, so it is obvious which mesh came from where.
-    primitiveColors = {
-        "Sphere Class": "#ee380a",
-        "Capsuloid Class": "#2f76b9",
-        "Prysmoid Class": "#9545d6",
-        # Interpolated spheres keep the colour of the primitive they came from.
-        "Capsuloid Interpolation": "#2f76b9",
-        "Prysmoid Interpolation": "#9545d6",
-        "Surface Mesh": "#ffffff",
-        "Closest Sphere": "#07beb8",
-    }
-
-    class MergedSpheres:
-        """Many spheres drawn as one mesh, so they cost a single plotly trace.
-
-        Stands in for a primitive in renderPrimitives: it has a name (colour,
-        legend and hover label) and a buildGeometry().
-        """
-
-        def __init__(self, spheres, name):
-            self.spheres = list(spheres)
-            self.name = name
-
-        def buildGeometry(self, numTheta, numPhi):
-            allVertices = []
-            allTriangles = []
-            vertexOffset = 0
-            for sphere in self.spheres:
-                vertices, triangles = sphere.buildGeometry(numTheta, numPhi)
-                allVertices.append(vertices)
-                allTriangles.append(triangles + vertexOffset)
-                vertexOffset += len(vertices)
-            return np.vstack(allVertices), np.vstack(allTriangles)
-
-    class HighlightedSphere:
-        """One sphere drawn opaque over dimmed context, labelled by what it is.
-
-        The hover carries the contributions SphereMesh.closestSphere() returns -
-        which constituent spheres the result interpolates, and by how much -
-        in place of the raw coordinates every other trace shows, since those
-        weights are the answer being looked at.
-        """
-
-        def __init__(self, sphere, name, contributions):
-            self.sphere = sphere
-            self.name = name
-            contributionLines = "".join(
-                f"<br>s{sphereIndex} {contribution:.3f}"
-                for sphereIndex, contribution in contributions
-            )
-            self.drawWireframe = False
-            self.traceOverrides = dict(
-                opacity=1.0,
-                hovertemplate=f"{name}{contributionLines}<extra></extra>",
-            )
-
-        def buildGeometry(self, numTheta, numPhi):
-            return self.sphere.buildGeometry(numTheta, numPhi)
-
-    def loadObjMesh(objPath):
-        """The vertices, triangles and per-vertex normals of a Wavefront .obj.
-
-        Corners are reduced to their vertex index, so the v, v/vt, v//vn and
-        v/vt/vn forms all read the same, and a face with more than three
-        corners is fanned into triangles.
-
-        .obj normals belong to face corners, not to vertices: arm.obj gives one
-        normal per face, shared by its three corners. A vertex's normal is the
-        normalized sum of the normals its corners name. A file without normals
-        (SMPL_male.obj) gets them from the triangles instead, as the
-        area-weighted sum of the incident face normals. A vertex no face
-        touches gets NaN.
-        """
-        vertices = []
-        fileNormals = []
-        triangles = []
-        # (vertex index, normal index) for every face corner that names a normal.
-        cornerNormalPairs = []
-        with open(objPath, "r") as objFile:
-            for line in objFile:
-                if line.startswith("v "):
-                    vertices.append([float(value) for value in line.split()[1:4]])
-                elif line.startswith("vn "):
-                    fileNormals.append(
-                        [float(value) for value in line.split()[1:4]]
-                    )
-                elif line.startswith("f "):
-                    # .obj indices start at 1, and a negative one counts back
-                    # from the last vertex (or normal) read so far.
-                    corners = []
-                    for corner in line.split()[1:]:
-                        fields = corner.split("/")
-                        vertexIndex = int(fields[0])
-                        vertexIndex = (
-                            vertexIndex - 1
-                            if vertexIndex > 0
-                            else len(vertices) + vertexIndex
-                        )
-                        corners.append(vertexIndex)
-                        if len(fields) == 3 and fields[2]:
-                            normalIndex = int(fields[2])
-                            normalIndex = (
-                                normalIndex - 1
-                                if normalIndex > 0
-                                else len(fileNormals) + normalIndex
-                            )
-                            cornerNormalPairs.append((vertexIndex, normalIndex))
-                    for fanIndex in range(1, len(corners) - 1):
-                        triangles.append(
-                            [corners[0], corners[fanIndex], corners[fanIndex + 1]]
-                        )
-
-        vertices = np.asarray(vertices, dtype=float)
-        triangles = np.asarray(triangles, dtype=int)
-
-        vertexNormals = np.zeros_like(vertices)
-        if cornerNormalPairs:
-            cornerVertexIndices, cornerNormalIndices = np.asarray(cornerNormalPairs).T
-            np.add.at(
-                vertexNormals,
-                cornerVertexIndices,
-                np.asarray(fileNormals, dtype=float)[cornerNormalIndices],
-            )
-        else:
-            # Unnormalized cross products are twice the face area long, which
-            # is what weights each face by its area in the sum.
-            faceNormals = np.cross(
-                vertices[triangles[:, 1]] - vertices[triangles[:, 0]],
-                vertices[triangles[:, 2]] - vertices[triangles[:, 0]],
-            )
-            for cornerSlot in range(3):
-                np.add.at(vertexNormals, triangles[:, cornerSlot], faceNormals)
-
-        normalLengths = np.linalg.norm(vertexNormals, axis=1, keepdims=True)
-        vertexNormals = np.divide(
-            vertexNormals,
-            normalLengths,
-            out=np.full_like(vertexNormals, np.nan),
-            where=normalLengths > 0,
-        )
-        return vertices, triangles, vertexNormals
-
-    class ObjSurface:
-        """A loaded .obj standing in for a primitive in renderPrimitives.
-
-        It carries its own plotly settings so it renders as a thin shell of
-        clear plastic - smooth-shaded, barely tinted white and glossy - with
-        the sphere mesh it was fitted to staying visible inside it.
-        """
-
-        def __init__(self, vertices, triangles, name, opacity):
-            self.vertices = vertices
-            self.triangles = triangles
-            self.name = name
-            # A wireframe over a few thousand triangles would bury the shell,
-            # and the spheres inside it, under a mess of lines.
-            self.drawWireframe = False
-            self.traceOverrides = dict(
-                opacity=opacity,
-                flatshading=False,
-                lighting=dict(
-                    ambient=0.55,
-                    diffuse=0.6,
-                    specular=0.9,
-                    roughness=0.15,
-                    fresnel=1.6,
-                ),
-            )
-
-        def buildGeometry(self, numTheta, numPhi):
-            return self.vertices, self.triangles
-
-    # Two hue families that meet at 0 with a hard break, so even a tiny d shows
-    # its sign: cool for inside the sphere mesh (cyan near 0, deepening to
-    # dark blue), warm for outside (yellow near 0, deepening to dark red).
-    # Each list runs from the band next to 0 out to the band at the limit.
-    insideColorAnchors = ["#8ee8f2", "#2fa4e7", "#1f5fd0", "#0d2a85"]
-    outsideColorAnchors = ["#ffe45c", "#ffa63d", "#e8492e", "#8c1010"]
-    # Above the cutoff a vertex is out of tolerance; grey says so instead of
-    # letting it pass for the strongest in-range red.
-    cutoffColor = "#4a4a4a"
-
-    # Nearly flat colour: a high ambient floor with only a little diffuse on
-    # top, and no highlight or rim, so a band reads as the same colour all the
-    # way round the surface instead of darkening into the greys of the cutoff.
-    heatmapLighting = dict(
-        ambient=0.85, diffuse=0.2, specular=0.0, roughness=1.0, fresnel=0.0
-    )
-
-    def sampleColorRamp(anchors, count):
-        """count colours evenly spaced along the hex anchors, in RGB."""
-        anchorRgb = np.array(
-            [[int(anchor[k:k + 2], 16) for k in (1, 3, 5)] for anchor in anchors],
-            dtype=float,
-        )
-        positions = np.linspace(0.0, len(anchors) - 1, count)
-        colors = []
-        for position in positions:
-            lower = min(int(position), len(anchors) - 2)
-            fraction = position - lower
-            rgb = (1 - fraction) * anchorRgb[lower] + fraction * anchorRgb[lower + 1]
-            colors.append("#" + "".join(f"{int(round(c)):02x}" for c in rgb))
-        return colors
-
-    class DistanceHeatmapSurface:
-        """A loaded .obj coloured per vertex by its signed distance.
-
-        Stands in for a primitive in renderPrimitives, like ObjSurface. The
-        scale is fixed at +-distanceLimit and symmetric about 0, split into
-        flat bands bandWidth wide: cool bands below 0, warm bands above, with a
-        hard break at 0. Only the positive side is cut off: a d above
-        distanceLimit is drawn in cutoffColor, while a d below -distanceLimit
-        stays in the deepest blue band. hoverTexts holds one label per vertex,
-        which is what plotly shows on hover.
-        """
-
-        def __init__(
-            self, vertices, triangles, distances, hoverTexts, name, opacity,
-            distanceLimit, bandWidth=0.005
-        ):
-            self.vertices = vertices
-            self.triangles = triangles
-            self.name = name
-            self.drawWireframe = False
-
-            bandCount = max(1, int(round(distanceLimit / bandWidth)))
-            insideBands = sampleColorRamp(insideColorAnchors, bandCount)
-            outsideBands = sampleColorRamp(outsideColorAnchors, bandCount)
-
-            # The colour axis runs from -distanceLimit to a margin past
-            # +distanceLimit, which holds the grey cutoff cap. Plotly clamps
-            # anything beyond the axis to its end colour.
-            axisMin = -distanceLimit
-            axisMax = 1.1 * distanceLimit
-
-            def axisPosition(value):
-                return (value - axisMin) / (axisMax - axisMin)
-
-            # Bands from the most negative up: deepest blue ... cyan | yellow
-            # ... dark red | grey. Repeating each edge with the next colour
-            # makes every step hard, so a band is one flat colour, not a blend.
-            bandEdges = np.linspace(-distanceLimit, distanceLimit, 2 * bandCount + 1)
-            bandColors = insideBands[::-1] + outsideBands + [cutoffColor]
-            # The grey cap is the last band, from the limit to the axis end.
-            colorEdges = [axisPosition(edge) for edge in bandEdges] + [1.0]
-            colorscale = []
-            for bandIndex, bandColor in enumerate(bandColors):
-                colorscale += [
-                    [colorEdges[bandIndex], bandColor],
-                    [colorEdges[bandIndex + 1], bandColor],
-                ]
-
-            # intensity takes precedence over the flat colour renderPrimitives
-            # assigns, so the per-type colour never shows on this trace.
-            self.traceOverrides = dict(
-                intensity=distances,
-                intensitymode="vertex",
-                colorscale=colorscale,
-                cmin=axisMin,
-                cmax=axisMax,
-                showscale=True,
-                colorbar=dict(
-                    title="d [mm]",
-                    thickness=12,
-                    len=0.6,
-                    tickvals=bandEdges,
-                    ticktext=[f"{1000 * edge:+.0f}" for edge in bandEdges],
-                ),
-                opacity=opacity,
-                flatshading=False,
-                lighting=heatmapLighting,
-                text=hoverTexts,
-                hovertemplate="%{text}<extra></extra>",
-            )
-
-        def buildGeometry(self, numTheta, numPhi):
-            return self.vertices, self.triangles
-
-    def buildWireframeSegments(vertices, triangles):
-        """One polyline per unique triangle edge, NaN-separated for Scatter3d."""
-        edges = np.vstack(
-            (triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]])
-        )
-        edges = np.unique(np.sort(edges, axis=1), axis=0)
-
-        segments = np.full((len(edges) * 3, 3), np.nan, dtype=vertices.dtype)
-        segments[0::3] = vertices[edges[:, 0]]
-        segments[1::3] = vertices[edges[:, 1]]
-        return segments
-
-    # Where every figure's camera starts.
-    defaultCameraEye = dict(x=1.6, y=-1.6, z=0.9)
-
-    # Pure Lambertian shading: an ambient fill plus diffuse, with no specular
-    # highlight or fresnel rim, so brightness depends only on how a surface
-    # faces the light. Plotly's own default (ambient 0.8 + diffuse 0.8)
-    # saturates to full brightness on nearly every face, which shows no shape.
-    # The light is fixed in the scene, not to the camera, so it is put along
-    # the starting eye direction: the opening view is lit from the front, and
-    # orbiting round shows the far side at the ambient level. Plotly caps each
-    # light coordinate at 1e5, hence the rescale.
-    _lightScale = 1e5 / max(abs(value) for value in defaultCameraEye.values())
-    lambertianShading = dict(
-        lighting=dict(
-            ambient=0.4, diffuse=0.6, specular=0.0, roughness=1.0, fresnel=0.0
-        ),
-        lightposition={
-            axis: value * _lightScale for axis, value in defaultCameraEye.items()
-        },
-    )
-
-    def renderPrimitives(
-        primitives, title, numTheta, numPhi, opacity, showWireframe, showAxes,
-        showLegend=True, backgroundColor=None, uiRevision=None,
-        primitiveColor=None, lambertian=False
-    ):
-        """Render each primitive's buildGeometry() output into one 3D figure.
-
-        backgroundColor paints the whole figure (paper, plot and scene) and
-        switches the wireframe to a light colour, for a dark-themed plot.
-        uiRevision defaults to the title; pass it explicitly when the figure has
-        no title, so the camera survives a slider change.
-        primitiveColor replaces the per-type colours with one, for a figure
-        where colour already encodes something else.
-        lambertian shades every mesh with lambertianShading instead of plotly's
-        default lighting; a primitive's own traceOverrides still win.
-        """
-        traces = []
-        drawnLabels = set()
-        wireframeColor = "#fbfcfc" if backgroundColor else "black"
-
-        for primitive in primitives:
-            vertices, triangles = primitive.buildGeometry(numTheta, numPhi)
-            # Half the bytes of float64/int64 in the output marimo ships to the
-            # browser, at far more precision than a plot can show.
-            vertices = np.asarray(vertices, dtype=np.float32)
-            triangles = np.asarray(triangles, dtype=np.int32)
-
-            color = primitiveColor or primitiveColors.get(primitive.name, "#747070")
-            # Only the first mesh of a type carries the legend entry; the group
-            # makes a click on it toggle every mesh of that type.
-            showTraceLegend = primitive.name not in drawnLabels
-            drawnLabels.add(primitive.name)
-
-            meshArguments = dict(
-                x=vertices[:, 0],
-                y=vertices[:, 1],
-                z=vertices[:, 2],
-                i=triangles[:, 0],
-                j=triangles[:, 1],
-                k=triangles[:, 2],
-                color=color,
-                opacity=opacity,
-                flatshading=True,
-                name=primitive.name,
-                legendgroup=primitive.name,
-                showlegend=showTraceLegend,
-                hovertemplate=(
-                    f"{primitive.name}<br>"
-                    "x %{x:.3f}<br>y %{y:.3f}<br>z %{z:.3f}<extra></extra>"
-                ),
-            )
-            if lambertian:
-                meshArguments.update(lambertianShading)
-            # A primitive may bring its own plotly settings, which is how the
-            # .obj shell gets its transparency and gloss.
-            meshArguments.update(getattr(primitive, "traceOverrides", {}))
-            traces.append(go.Mesh3d(**meshArguments))
-
-            if showWireframe and getattr(primitive, "drawWireframe", True):
-                segments = buildWireframeSegments(vertices, triangles)
-                traces.append(
-                    go.Scatter3d(
-                        x=segments[:, 0],
-                        y=segments[:, 1],
-                        z=segments[:, 2],
-                        mode="lines",
-                        line=dict(color=wireframeColor, width=1),
-                        legendgroup=primitive.name,
-                        showlegend=False,
-                        hoverinfo="skip",
-                    )
-                )
-
-        figure = go.Figure(data=traces)
-        figure.update_layout(
-            title=title,
-            height=600,
-            margin=dict(l=0, r=0, t=40, b=0),
-            legend=dict(x=0.0, y=1.0),
-            showlegend=showLegend,
-            # Keeps the camera where the user left it when a slider re-runs the cell.
-            uirevision=uiRevision if uiRevision is not None else title,
-            scene=dict(
-                # 'data' gives all three axes the same unit length, so nothing is
-                # stretched the way an auto aspect ratio would stretch it.
-                aspectmode="data",
-                xaxis_title="x",
-                yaxis_title="y",
-                zaxis_title="z",
-                xaxis=dict(visible=showAxes),
-                yaxis=dict(visible=showAxes),
-                zaxis=dict(visible=showAxes),
-                camera=dict(eye=defaultCameraEye),
-            ),
-        )
-
-        if backgroundColor:
-            figure.update_layout(
-                paper_bgcolor=backgroundColor,
-                plot_bgcolor=backgroundColor,
-                font=dict(color="#fbfcfc"),
-            )
-            figure.update_scenes(bgcolor=backgroundColor)
-
-        return figure
-
-    return (
-        DistanceHeatmapSurface,
-        HighlightedSphere,
-        MergedSpheres,
-        ObjSurface,
-        loadObjMesh,
-        renderPrimitives,
-    )
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## 1 - One sphere
-    """)
-    return
-
-
-@app.cell
-def _(SphereMesh):
-    # ---- mesh 1: a single sphere ----------------------------------------
-    meshSingleSphere = SphereMesh()
-
-    singelspheremesh=  """ Sphere Mesh 2.0
-                        1 0 0 0
-                        0.0 0.0 0.0 1.0"""
-
-    meshSingleSphere.loadFromText(singelspheremesh)
-    singleSpherePrimitives = list(meshSingleSphere.spheres)
-    return meshSingleSphere, singleSpherePrimitives
-
-
-@app.cell
-def _(
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
-    renderPrimitives,
-    showAxesCheckbox,
-    showWireframeCheckbox,
-    singleSpherePrimitives,
-):
-    renderPrimitives(
-        singleSpherePrimitives,
-        "SphereMesh with 1 sphere",
-        numThetaSlider.value,
-        numPhiSlider.value,
-        opacitySlider.value,
-        showWireframeCheckbox.value,
-        showAxesCheckbox.value,
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## 2 — one capsuloid
-    """)
-    return
-
-
-@app.cell
-def _(SphereMesh, showSpheresCheckbox):
-    # ---- mesh 2: two spheres joined by one capsuloid ---------------------
-    meshCapsuloid = SphereMesh()
-
-    capspheremesh=  """ Sphere Mesh 2.0
-                        2 0 1 0
-                        0.0 0.0 0.0 0.9
-                        1.5 0.5 0.0 0.4
-                        0 1"""
-
-    meshCapsuloid.loadFromText(capspheremesh)
-
-    capsuloidPrimitives = list(meshCapsuloid.capsuloids)
-    if showSpheresCheckbox.value:
-        capsuloidPrimitives = list(meshCapsuloid.spheres) + capsuloidPrimitives
-    return capsuloidPrimitives, meshCapsuloid
-
-
-@app.cell
-def _(
-    capsuloidPrimitives,
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
-    renderPrimitives,
-    showAxesCheckbox,
-    showWireframeCheckbox,
-):
-    renderPrimitives(
-        capsuloidPrimitives,
-        "SphereMesh with 1 capsuloid",
-        numThetaSlider.value,
-        numPhiSlider.value,
-        opacitySlider.value,
-        showWireframeCheckbox.value,
-        showAxesCheckbox.value,
-    )
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## 3 — one prysmoid
-    """)
-    return
-
-
-@app.cell
-def _(SphereMesh, showSpheresCheckbox):
-    # ---- mesh 3: three spheres spanned by one prysmoid -------------------
-    meshPrysmoid = SphereMesh()
-
-    trispheremesh=  """ Sphere Mesh 2.0
-                        3 1 0 0
-                        0.0 0.0 0.0 0.9
-                        2.5 0.0 0.0 0.6
-                        1.0 3.2 0.3 0.45
-                        0 1 2"""
-
-    meshPrysmoid.loadFromText(trispheremesh)
-
-
-    prysmoidPrimitives = list(meshPrysmoid.prysmoids)
-    if showSpheresCheckbox.value:
-        prysmoidPrimitives = list(meshPrysmoid.spheres) + prysmoidPrimitives
-    return meshPrysmoid, prysmoidPrimitives
-
-
-@app.cell
-def _(
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
-    prysmoidPrimitives,
-    renderPrimitives,
-    showAxesCheckbox,
-    showWireframeCheckbox,
-):
-    renderPrimitives(
-        prysmoidPrimitives,
-        "SphereMesh with 1 prysmoid",
-        numThetaSlider.value,
-        numPhiSlider.value,
-        opacitySlider.value,
-        showWireframeCheckbox.value,
-        showAxesCheckbox.value,
-    )
-    return
 
 
 @app.cell(hide_code=True)
@@ -727,19 +195,10 @@ def _(SphereMesh, np, sphereMeshPathsByMeshName):
 
 
 @app.cell
-def _(
-    SmplSM,
-    armSM,
-    bunnySM,
-    meshCapsuloid,
-    meshPrysmoid,
-    meshSingleSphere,
-    mo,
-):
+def _(SmplSM, armSM, bunnySM, mo):
+    # The single-sphere, capsuloid and prysmoid test meshes live in
+    # SMClasstest.py now, so the picker offers only the fitted examples.
     meshesByName = {
-        "single-sphere": meshSingleSphere,
-        "capsuloid": meshCapsuloid,
-        "prysmoid": meshPrysmoid,
         "bunny": bunnySM,
         "smpl": SmplSM,
         "smpl_arm": armSM,
@@ -747,7 +206,7 @@ def _(
 
     meshSelector = mo.ui.dropdown(
         options=list(meshesByName),
-        value="single-sphere",
+        value="smpl",
         label="sphere mesh",
     )
     showInterpolationCheckbox = mo.ui.checkbox(
@@ -1172,7 +631,7 @@ def _(
     showWireframeCheckbox,
 ):
     # The colour scale spans +-this; a d above it is drawn dark grey.
-    heatmapDistanceLimit = 0.035
+    heatmapDistanceLimit = 0.02
 
     _hoverTexts = [
         f"vertex {vertexIndex}<br>d {distance:.4f}"
@@ -1392,7 +851,7 @@ def _(dfVertices, lil_matrix, mesh_vertices, np, spheremesh):
 @app.cell
 def _(A, M, b, diags, np, spheremesh, vstack):
     #Regularization
-    P, P_r = 0.05, 0.05 
+    P, P_r = 0.25, 0.25 
 
     x0 = np.zeros(4 * M)
     for j, s in enumerate(spheremesh.spheres):
@@ -1833,6 +1292,36 @@ def _(A_reg, M, go, np, plt):
 
 
 @app.cell
+def _(A_reg, M, np):
+    #print number of columns with no contributions
+    # The last 4M rows of A_reg are the regularization diagonal, which puts a
+    # 0.05 in every column, so only the vertex rows above it are checked.
+    _vertexRows = A_reg[: A_reg.shape[0] - 4 * M]
+    _nonZeroCounts = np.asarray((_vertexRows != 0).sum(axis=0)).ravel()
+    _emptyColumns = np.flatnonzero(_nonZeroCounts == 0)
+    _unknownNames = ("cx", "cy", "cz", "r")
+
+    print(f"{len(_emptyColumns)} of {_vertexRows.shape[1]} columns of A are all zero:")
+    for _column in _emptyColumns:
+        print(f"  column {_column}: s{_column // 4} {_unknownNames[_column % 4]}")
+
+    # The all-zero columns are listed above, so the emptiest ones worth naming
+    # are the emptiest columns that still have a vertex in them. A sphere's
+    # four columns usually tie, so every column at the minimum is listed.
+    _nonEmptyCounts = _nonZeroCounts[_nonZeroCounts > 0]
+    if len(_nonEmptyCounts) > 0:
+        _minimumCount = _nonEmptyCounts.min()
+        _emptiestColumns = np.flatnonzero(_nonZeroCounts == _minimumCount)
+        print(
+            f"the emptiest non-empty columns have {_minimumCount} non-zero values "
+            f"({len(_emptiestColumns)} columns):"
+        )
+        for _column in _emptiestColumns:
+            print(f"  column {_column}: s{_column // 4} {_unknownNames[_column % 4]}")
+    return
+
+
+@app.cell
 def _(fittedSMDistances, go, np):
     #some stats of fittedSMDistances
 
@@ -1857,7 +1346,196 @@ def _(fittedSMDistances, go, np):
         height=400,
         margin=dict(l=60, r=20, t=50, b=60),
     )
+    return
 
+
+@app.cell
+def _(
+    ObjSurface,
+    dfVertices,
+    fittedMesh,
+    go,
+    mesh_normals,
+    mesh_triangles,
+    mesh_vertices,
+    mo,
+    np,
+    numPhiSlider,
+    numThetaSlider,
+    renderPrimitives,
+    showWireframeCheckbox,
+    spheremesh,
+):
+    #solving butt problem
+
+    #show only vertecies in which the original closest sphere - vertex position direction disagree with the vertex normal
+
+    # A vertex is shown when n . (p - c) / |p - c| falls below this, with c the
+    # centre of its closest sphere in the original mesh. 1 means the normal
+    # points straight away from that sphere, as the tangency equation of
+    # section 8 assumes; 0.5 is 60 degrees off.
+    alignmentThreshold = 0.5
+
+    # The closest sphere's centre is its contributions' blend of the constituent
+    # centres - exactly, for a capsuloid's lerp and for a prysmoid's barycentric
+    # point on the midplane - so section 6's table already holds it.
+    constituentCentres = np.array([sphere.center for sphere in spheremesh.spheres])
+    _contributionsPerVertex = list(dfVertices["contributions"])
+    _closestCentres = np.array([
+        sum(weight * constituentCentres[sphereIndex] for sphereIndex, weight in contributions)
+        if contributions else np.full(3, np.nan)
+        for contributions in _contributionsPerVertex
+    ])
+    _offsets = mesh_vertices - _closestCentres
+    vertexAlignment = (
+        np.einsum("ij,ij->i", mesh_normals, _offsets)
+        / np.linalg.norm(_offsets, axis=1)
+    )
+    # A vertex without contributions has a NaN alignment, which this skips.
+    misalignedVertexIndices = np.flatnonzero(vertexAlignment < alignmentThreshold)
+
+    # How much of the solve those vertices hand each constituent sphere.
+    _weightBySphere = {}
+    for _vertexIndex in misalignedVertexIndices:
+        for _sphereIndex, _weight in _contributionsPerVertex[_vertexIndex]:
+            _weightBySphere[_sphereIndex] = _weightBySphere.get(_sphereIndex, 0.0) + _weight
+    _involvedSphereIndices = sorted(
+        (sphereIndex for sphereIndex, weight in _weightBySphere.items() if weight > 0.01),
+        key=lambda sphereIndex: -_weightBySphere[sphereIndex],
+    )
+
+    # Only the spheres those vertices pull on, translucent, inside a faint
+    # shell cut down to the box around them (plus 5 cm), so the view opens on
+    # them rather than on the whole body.
+    if _involvedSphereIndices:
+        _involvedRadii = np.array(
+            [spheremesh.spheres[sphereIndex].radius for sphereIndex in _involvedSphereIndices]
+        )
+        _involvedCentres = constituentCentres[_involvedSphereIndices]
+        _boxMin = (_involvedCentres - _involvedRadii[:, None]).min(axis=0) - 0.05
+        _boxMax = (_involvedCentres + _involvedRadii[:, None]).max(axis=0) + 0.05
+        _vertexInBox = np.all((mesh_vertices >= _boxMin) & (mesh_vertices <= _boxMax), axis=1)
+        _keptTriangles = mesh_triangles[_vertexInBox[mesh_triangles].all(axis=1)]
+        # Re-indexed onto the vertices they use: plotly sizes the scene to every
+        # vertex it is given, referenced or not.
+        _shellVertexIndices, _shellCorners = np.unique(_keptTriangles.ravel(), return_inverse=True)
+        _shellVertices = mesh_vertices[_shellVertexIndices]
+        _shellTriangles = _shellCorners.reshape(-1, 3)
+    else:
+        _shellVertices, _shellTriangles = mesh_vertices, mesh_triangles
+    _primitives = [spheremesh.spheres[sphereIndex] for sphereIndex in _involvedSphereIndices]
+    _primitives.append(ObjSurface(_shellVertices, _shellTriangles, "Surface Mesh", 0.15))
+    misalignmentFigure = renderPrimitives(
+        _primitives,
+        None,
+        numThetaSlider.value,
+        numPhiSlider.value,
+        0.15,
+        showWireframeCheckbox.value,
+        showAxes=False,
+        showLegend=True,
+        backgroundColor="#1d252b",
+        uiRevision=f"misaligned {fittedMesh}",
+        lambertian=True,
+    )
+    # Front (-y) and a little below, closer than the notebook's usual eye:
+    # these vertices sit between the legs, with their normals facing down.
+    misalignmentFigure.update_layout(scene_camera=dict(eye=dict(x=0.45, y=-1.25, z=-0.2)))
+
+    def _segments(starts, ends):
+        """NaN-separated start-end pairs, one polyline per segment for Scatter3d."""
+        points = np.full((3 * len(starts), 3), np.nan)
+        points[0::3] = starts
+        points[1::3] = ends
+        return points
+
+    _positions = mesh_vertices[misalignedVertexIndices]
+    _normals = mesh_normals[misalignedVertexIndices]
+    _centres = _closestCentres[misalignedVertexIndices]
+    _alignments = vertexAlignment[misalignedVertexIndices]
+
+    # What the tangency equation assumes the normal to be, next to what it is.
+    _centreSegments = _segments(_centres, _positions)
+    misalignmentFigure.add_trace(go.Scatter3d(
+        x=_centreSegments[:, 0], y=_centreSegments[:, 1], z=_centreSegments[:, 2],
+        mode="lines", line=dict(color="#c3c2b7", width=2),
+        name="closest-sphere centre → vertex", hoverinfo="skip",
+    ))
+    _normalSegments = _segments(_positions, _positions + 0.05 * _normals)
+    misalignmentFigure.add_trace(go.Scatter3d(
+        x=_normalSegments[:, 0], y=_normalSegments[:, 1], z=_normalSegments[:, 2],
+        mode="lines", line=dict(color="#ff7f0e", width=4),
+        name="vertex normal (5 cm)", hoverinfo="skip",
+    ))
+
+    # One blue, light to dark: the lightest, most visible on the dark
+    # background, are the vertices that disagree the most.
+    misalignmentFigure.add_trace(go.Scatter3d(
+        x=_positions[:, 0], y=_positions[:, 1], z=_positions[:, 2],
+        mode="markers",
+        marker=dict(
+            size=8,
+            color=_alignments,
+            colorscale=[[0.0, "#cde2fb"], [1.0, "#2a78d6"]],
+            cmin=-1.0,
+            cmax=alignmentThreshold,
+            colorbar=dict(title="n·(p−c)/|p−c|", thickness=12, len=0.6),
+        ),
+        name="misaligned vertex",
+        text=[
+            f"vertex {vertexIndex}<br>n·(p−c)/|p−c| {alignment:+.2f}"
+            + "".join(
+                f"<br>s{sphereIndex} {weight:.3f}"
+                for sphereIndex, weight in _contributionsPerVertex[vertexIndex]
+            )
+            for vertexIndex, alignment in zip(misalignedVertexIndices, _alignments)
+        ],
+        hovertemplate="%{text}<extra></extra>",
+    ))
+
+    # Each involved sphere named at its centre.
+    _labelCentres = constituentCentres[_involvedSphereIndices]
+    misalignmentFigure.add_trace(go.Scatter3d(
+        x=_labelCentres[:, 0], y=_labelCentres[:, 1], z=_labelCentres[:, 2],
+        mode="text",
+        text=[f"s{sphereIndex}" for sphereIndex in _involvedSphereIndices],
+        textfont=dict(color="#fbfcfc", size=13),
+        showlegend=False,
+        hoverinfo="skip",
+    ))
+
+    mo.vstack(
+        [
+            mo.md(
+                f"**{len(misalignedVertexIndices)}** of {len(mesh_vertices)} vertices "
+                f"have n·(p−c)/|p−c| < {alignmentThreshold} against their closest "
+                f"sphere in the original mesh. The weight they hand the solve: "
+                + ", ".join(
+                    f"`s{sphereIndex}` {_weightBySphere[sphereIndex]:.1f}"
+                    for sphereIndex in _involvedSphereIndices
+                )
+            ),
+            misalignmentFigure,
+        ],
+        gap=1,
+    )
+    return
+
+
+@app.cell
+def _(SphereMesh, fittedMesh, fitted_SM_text, meshRotation):
+    #save the fitted sphere mesh to a file
+    #rotate back to the original orientation, so it can be loaded into marimo
+    # This is necessary because the fitting process is done in a different coordinate system.
+    # A rotation's inverse is its transpose. It is applied to a copy rebuilt
+    # from fitted_SM_text, never to fittedSM: marimo may run sections 10 and 11
+    # after this cell, and they must draw fittedSM in the plot's orientation.
+    # Saved into examples/, where sphereMeshPathsByMeshName reads it, so the
+    # next run starts from this fit.
+    _savedSM = SphereMesh()
+    _savedSM.loadFromText(fitted_SM_text)
+    _savedSM.rotate(meshRotation.T)
+    _savedSM.saveToFile(f"examples/fitted_{fittedMesh}.txt")
     return
 
 
