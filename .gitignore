@@ -227,3 +227,5 @@ __marimo__/
 *.spec.bak
 
 *.png
+*/data/save_*.json
+*/examples/*
