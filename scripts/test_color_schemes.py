@@ -1,6 +1,7 @@
 """End-to-end check of the color schemes (Class Colors, Random Colors, Reset Colors).
 
-Class Colors paints spheres red, capsuloids (cones) blue and prysmoids (triangles) violet.
+Class Colors paints spheres red, capsuloids (cones) blue and prysmoids (triangles) violet,
+in the colours of SMFitting's views, and is the scheme the tool starts in.
 Checks that the toolbar handlers recolor sphere widgets, connectors and spheremesh actors;
 that selection and lock colors still win; and that spheres and connections created later
 (Add Sphere, Add Connection, Divide, loading a file) follow the active scheme.
@@ -11,6 +12,7 @@ Run with: python scripts/test_color_schemes.py
 """
 from __future__ import annotations
 
+import ast
 import sys
 import tempfile
 from pathlib import Path
@@ -73,6 +75,17 @@ def plain_connections(manager):
     ]
 
 
+def smfitting_primitive_colors() -> dict:
+    """primitiveColors from SMFitting/PlotlyView.py, read without importing plotly."""
+    plotly_view_path = Path(__file__).resolve().parent.parent / "SMFitting" / "PlotlyView.py"
+    for node in ast.parse(plotly_view_path.read_text()).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "primitiveColors" for target in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    return {}
+
+
 def expected_class_color(connection) -> str:
     return CAPSULOID_CLASS_COLOR if len(connection.sphere_indices) == 2 else PRYSMOID_CLASS_COLOR
 
@@ -105,8 +118,21 @@ def main() -> int:
     print(f"Loaded {manager.get_sphere_count()} spheres, {cone_count} cones, "
           f"{len(manager.connections) - cone_count} triangles")
 
-    print("\nDefault scheme")
-    check(manager.color_scheme == "default", "starts on the default scheme")
+    print("\nStartup scheme")
+    notebook_colors = smfitting_primitive_colors()
+    tool_colors = (SPHERE_CLASS_COLOR, CAPSULOID_CLASS_COLOR, PRYSMOID_CLASS_COLOR)
+    check(
+        tool_colors == tuple(notebook_colors.get(name) for name in
+                             ("Sphere Class", "Capsuloid Class", "Prysmoid Class")),
+        "class colors are SMFitting's primitiveColors",
+        ", ".join(tool_colors),
+    )
+    check(manager.color_scheme == "class", "starts on the class scheme")
+    check_class_colors(manager, "at startup")
+
+    print("\nReset Colors from startup")
+    window.reset_colors_clicked()
+    check(manager.color_scheme == "default", "scheme switched to default")
     check(
         all(same_color(sphere_color(s), manager.normal_color) for s in plain_spheres(manager)),
         "spheres light blue",

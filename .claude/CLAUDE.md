@@ -21,7 +21,8 @@ when matching files are touched. Agents for recurring jobs live in `.claude/agen
 | Run the app | `uv run python main.py` |
 | Packaging self-test | `uv run python main.py --selftest` |
 | Windows build | `uv run python build_exe.py` (see README) |
-| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py` |
+| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py` |
+| SphereMesh class test | `scripts/test_sphere_mesh.py` |
 | Fitter tests | `scripts/test_sphere_fit.py`, `scripts/test_sphere_fit_inflation.py` |
 | Topology tests | `scripts/test_topology_{bumpers,sdf_torch,sections,validate,roundtrip,fit}.py` |
 | Score templates side by side | `uv run python scripts/compare_topologies.py [--poses] a.json b.json` |
@@ -44,9 +45,9 @@ GUI modules:
 | `src/ui_widgets.py` (~3.2k lines) | `MainWindow`: left button menu, plotter, `InfoPanel` overlay (top right), `ClipPlanesPanel`. Also `Skeleton`, the dialogs, and connection picking. |
 | `src/sphere_manager.py` | `SphereManager`, the model/controller. Owns spheres and connections, selection, FK binding, Inflate preview, beta offsets, mirror edits, Divide, and JSON load/save. |
 | `src/managed_sphere.py` | `ManagedSphere`: one sphere plus its `vtkSphereWidget`. It has no id; its identity is its index in `spheres`. |
-| `src/sphere_connection.py` | `SphereConnection`: 2 or 3 sphere indices, a thin gray connector actor, and a spheremesh actor shown with "Show Spheremeshes". |
-| `src/spheremesh.py` | `Spheremesh` (cone) and `Trispheremesh` (slab) geometry as `pv.PolyData`. |
-| `src/sphere_fit.py` | `optimize_spheres`, shared with the topology pipeline. |
+| `src/sphere_connection.py` | `SphereConnection`: 2 or 3 sphere indices, a thin gray connector actor, and a spheremesh actor shown with "Show Spheremeshes". Its shape and distances come from a fresh `SphereMesh` primitive per update. |
+| `src/sphere_mesh.py` | `SphereMesh` with `Sphere`, `Capsuloid` (cone), `Prysmoid` (slab): exact signed distances (scalar and vectorised), `closestSphere`, `buildGeometry`. The one implementation, shared with `SMFitting/` (camelCase, the user's style there). |
+| `src/sphere_fit.py` | `optimize_spheres`, shared with the topology pipeline. Its `spheremesh_distance` measures with `src/sphere_mesh.py`. |
 | `src/smpl_models.py`, `src/app_paths.py` | Model and template paths, frozen-build aware. |
 
 Data:
@@ -76,6 +77,8 @@ Topology docs:
 - `save_to_json` drops `quad_groups`.
 - `rest_radius` is a ratio (radius ÷ distance to the nearest vertex), not a length.
 - The Undo/Redo menu items do nothing; there is no undo.
+- `SMFitting/SphereMesh.py` is a stand-in that hands back `src.sphere_mesh` itself, so the
+  marimo notebooks keep `from SphereMesh import SphereMesh`. Edit `src/sphere_mesh.py`.
 
 ## Working conventions
 
@@ -116,8 +119,26 @@ Topology docs:
 - **Color schemes (2026-10):**
   - What it does: the Random Colors, Class Colors and Reset Colors buttons set
     `SphereManager.color_scheme` ("random", "class" or "default"). Class Colors paints
-    spheres red `#ec191b`, capsuloids blue `#357db9` and prysmoids violet `#9449d1`.
+    spheres red `#ee380a`, capsuloids blue `#2f76b9` and prysmoids violet `#9545d6`
+    (SMFitting's `primitiveColors`), and is the scheme the tool starts in.
   - New spheres and connections (Add, Divide, load) follow the active scheme.
   - Selection (cyan) and lock (yellow) colours still take priority.
   - Mechanism: the per-object override is `set_random_color`.
   - Test: `scripts/test_color_schemes.py`.
+- **SphereMesh port (2026-10):**
+  - What it does: the tool draws and measures with `src/sphere_mesh.py`, the class
+    SMFitting uses, instead of the old approximate `src/spheremesh.py` (deleted).
+    - Cones are open tangent cones.
+    - Triangles have exact tangent planes, solved in closed form.
+    - Shading is flat; spheres are 31 x 16 like `Sphere.buildGeometry(16, 32)`.
+  - Heatmap: the exact signed union distance, styled like SMFitting's
+    `DistanceHeatmapSurface` (5 mm bands over ±20 mm, cool inside / warm outside, grey
+    above). It recomputes after edits and pose/shape changes while on.
+  - Fixed on the way:
+    - Delete sphere re-indexed connections against the old list.
+    - The Inflate slider left the cones stale.
+    - Actors created after clip planes were set were not clipped.
+  - Code: `SphereConnection.build_primitive`, `SphereManager.get_heatmap`,
+    `MainWindow._on_show_heatmap` / `_refresh_heatmap_if_stale`.
+  - Tests: `scripts/test_sphere_mesh.py` (class, against `bumpers.py`),
+    `scripts/test_spheremesh_port.py` (GUI).

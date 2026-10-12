@@ -19,19 +19,12 @@ clearance inside. Every distance function here evaluates that minimum exactly --
 terms, the edge terms in closed form as round cones, and the interior term through the
 plane tangent to all three spheres.
 
-This deliberately differs from ``src.sphere_fit.spheremesh_distance`` in two ways, and the
-difference is the point of having this module:
-
-* that function approximates the cone term by clamping the projection onto the segment of
-  centres and interpolating the radius at the clamped parameter, which is exact only when
-  the two radii are equal;
-* it decomposes a 3-connection into its three edges and never evaluates the slab, so a
-  point resting on the middle of a triangle is reported as far outside the sphere-mesh when
-  it is in fact sitting on it.
-
-``spheremesh_distance`` stays exactly as it is -- it is the external fidelity metric that
-has to remain comparable across versions, and ``plan.md`` is explicit that it must not
-change. This module is what the topology validator measures with.
+``src.sphere_fit.spheremesh_distance`` used to differ from this in two ways: it approximated
+the cone term by clamping the projection onto the segment of centres, and it reduced a
+3-connection to its three edges, never evaluating the slab. Since 2026-10-12 it measures
+with ``src/sphere_mesh.py`` (the SphereMesh class the GUI renders with), which describes the
+same exact surface as the closed forms here; ``scripts/test_sphere_mesh.py`` pins the two
+against each other. This module is what the topology validator measures with.
 
 **Their adjacency.** The watchdog follows a cloth node from bumper to bumper along explicit
 topological links, never by proximity in space. ``BumperGraph`` builds those links from the

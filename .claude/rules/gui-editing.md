@@ -4,7 +4,7 @@ paths:
   - "src/ui_widgets.py"
   - "src/sphere_connection.py"
   - "src/managed_sphere.py"
-  - "src/spheremesh.py"
+  - "src/sphere_mesh.py"
 ---
 
 # Editing operations: invariants and checklist
@@ -25,7 +25,8 @@ Any code that adds, removes or changes spheres or connections must keep all of t
   - `_pre_uniform_radius_by_index`
   - `offsets_pos[k]`, `offsets_r[k]`
   - `_beta_template_pos`, `_beta_template_r` (only when beta offsets are loaded)
-- A triangle does not list its edges as separate cones; `Trispheremesh` draws its rim.
+- A triangle does not list its edges as separate cones; `SphereMesh.Prysmoid` draws and
+  measures its rim (its three `edgeCapsuloids`).
 
 ## Selection
 - `selected_sphere_index` and `selected_connection` exclude each other.
@@ -74,14 +75,24 @@ Any code that adds, removes or changes spheres or connections must keep all of t
   are then re-bound by `MainWindow._update_skeleton`.
 
 ## Geometry
-- `Spheremesh` raises `ValueError` on coincident centres. `Trispheremesh` never raises; on a
-  degenerate triangle it silently drops the caps.
+- Shapes and distances come from `src/sphere_mesh.py` (`SphereMesh.Capsuloid` for a cone,
+  `SphereMesh.Prysmoid` for a triangle), the one implementation shared with `SMFitting/`
+  (`SMFitting/SphereMesh.py` only re-exports it). Edit it there, and run
+  `scripts/test_sphere_mesh.py`.
+- The primitives cache their axis and planes when constructed. `SphereConnection` builds a
+  fresh one (`build_primitive()`) for every update and distance query; never keep one
+  across sphere edits.
+- The only geometry failure is coincident centres: `_build_connection` refuses them
+  (`SphereConnection.has_coincident_centers`). Everything else is drawn and measured
+  exactly, with one `warnings.warn` per primitive and no exception:
+  - a pair where one sphere contains the other is that sphere (its cone has zero area);
+  - a triangle with collinear centres or no tangent plane is its three edge capsuloids.
 - Build connections through `_build_connection(indices)`: it returns None on a geometry
   failure. Validate before mutating, and roll back on failure.
 - The primitives interpolate centres and radii linearly. That makes a midpoint or centroid
   split with the mean radius exactly volume-preserving.
-- `SphereConnection.get_distance` is approximate (off by up to 3 cm). For exact distances
-  use `round_cone_distances` and `prysmoid_distances` in `src/topology/bumpers.py`.
+- `SphereConnection.get_distance` / `get_distances` are exact. `scripts/test_sphere_mesh.py`
+  pins them to the closed forms in `src/topology/bumpers.py`.
 
 ## Persistence
 - Loading rounds centres to 3 decimals.

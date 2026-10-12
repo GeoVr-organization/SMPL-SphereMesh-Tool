@@ -5,9 +5,10 @@ connection list generates. It is written in numpy and is the reference the valid
 measures with; it cannot be differentiated. A fitter that wants to move sphere centres and
 radii so the body's vertices sit on the sphere-mesh needs the same function with gradients
 with respect to those centres and radii, and it needs them for the *exact* distance -- the
-approximate cone in ``src.sphere_fit.spheremesh_distance`` slides the true minimiser toward
-the larger ball and reports up to 24 mm of phantom gap on points that are exactly on the
-surface (``TOPOLOGY_HANDOFF.md`` 4.3), which is a gradient pointing the wrong way.
+approximate cone that ``src.sphere_fit.spheremesh_distance`` used until 2026-10 slid the
+true minimiser toward the larger ball and reported up to 24 mm of phantom gap on points
+that are exactly on the surface (``TOPOLOGY_HANDOFF.md`` 4.3), which is a gradient
+pointing the wrong way.
 
 So this module is a line-by-line port of the numerics in ``bumpers.py`` to torch, and the
 numerics are deliberately *not* rewritten: every branch is the same ``where`` on the same

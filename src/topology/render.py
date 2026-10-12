@@ -6,10 +6,10 @@ picture cover that:
 
 * **structure views** -- the body as a translucent grey mesh with the collider drawn on
   top: spheres coloured per anatomical group (a mirrored pair such as ``L_arm`` /
-  ``R_arm`` shares one hue, so left and right read as the same structure), cones drawn
-  with ``src.spheremesh.Spheremesh`` and slabs with ``Trispheremesh`` -- the very
-  geometry the tool renders, so what is shown is what the user will get; a quad is drawn
-  as its two split triangles exactly as the tool would show it;
+  ``R_arm`` shares one hue, so left and right read as the same structure), cones and
+  slabs drawn from ``src.sphere_mesh`` capsuloids and prysmoids at the tool's
+  tessellation -- the very geometry the tool renders, so what is shown is what the user
+  will get; a quad is drawn as its two split triangles exactly as the tool would show it;
 * **heat views** -- the opaque body coloured by the exact signed distance to the
   sphere-mesh (``src.topology.bumpers``), red where the skin protrudes outside the
   collider and blue where the collider leaves a gap, clipped to +/-20 mm so the scale
@@ -146,17 +146,33 @@ def _draw_collider(
     """Spheres, cones and slabs as the tool draws them. Returns the number skipped."""
     import pyvista as pv
 
-    from src.spheremesh import Spheremesh, Trispheremesh
+    from src.managed_sphere import SPHERE_WIDGET_PHI_RESOLUTION, SPHERE_WIDGET_THETA_RESOLUTION
+    from src.sphere_connection import (
+        COINCIDENT_CENTER_TOLERANCE,
+        SPHEREMESH_NUM_PHI,
+        SPHEREMESH_NUM_THETA,
+        triangles_to_faces,
+    )
+    from src.sphere_mesh import SphereMesh
 
     def label(index: int) -> str:
         return f"{index}" if names is None else f"{index} ({names[index]})"
 
+    def draw_primitive(primitive, colour) -> None:
+        vertices, triangles = primitive.buildGeometry(SPHEREMESH_NUM_THETA, SPHEREMESH_NUM_PHI)
+        actor = plotter.add_mesh(
+            pv.PolyData(vertices, triangles_to_faces(triangles)), color=colour, opacity=0.45
+        )
+        actor.GetProperty().SetInterpolationToFlat()
+
     for index, (center, radius) in enumerate(zip(centers, radii)):
         sphere = pv.Sphere(
             radius=float(radius), center=tuple(center),
-            theta_resolution=32, phi_resolution=32,
+            theta_resolution=SPHERE_WIDGET_THETA_RESOLUTION,
+            phi_resolution=SPHERE_WIDGET_PHI_RESOLUTION,
         )
-        plotter.add_mesh(sphere, color=colours[index], opacity=0.55, smooth_shading=True)
+        actor = plotter.add_mesh(sphere, color=colours[index], opacity=0.55)
+        actor.GetProperty().SetInterpolationToFlat()
 
     skipped = 0
     for connection in connections:
@@ -175,30 +191,31 @@ def _draw_collider(
             skipped += 1
             continue
 
-        try:
-            if len(connection) == 2:
-                first, second = connection
-                primitive = Spheremesh(
-                    center1=tuple(centers[first]), radius1=float(radii[first]),
-                    center2=tuple(centers[second]), radius2=float(radii[second]),
-                    resolution=32,
-                )
-                plotter.add_mesh(primitive, color=colour, opacity=0.45, smooth_shading=True)
-            else:
-                for first, second, third in triangles:
-                    primitive = Trispheremesh(
-                        center1=tuple(centers[first]), radius1=float(radii[first]),
-                        center2=tuple(centers[second]), radius2=float(radii[second]),
-                        center3=tuple(centers[third]), radius3=float(radii[third]),
-                        resolution=32,
-                    )
-                    plotter.add_mesh(primitive, color=colour, opacity=0.45, smooth_shading=True)
-        except ValueError as error:
+        # The tool refuses to build a connection over coincident centres; skip it the same way.
+        coincident = any(
+            np.linalg.norm(centers[first] - centers[second]) < COINCIDENT_CENTER_TOLERANCE
+            for position, first in enumerate(connection)
+            for second in connection[position + 1:]
+        )
+        if coincident:
             print(
                 f"[warn] skipped connection {' '.join(label(index) for index in connection)}: "
-                f"{error}"
+                "two sphere centres coincide"
             )
             skipped += 1
+            continue
+
+        spheres = {
+            index: SphereMesh.Sphere(index, centers[index], float(radii[index])) for index in connection
+        }
+        if len(connection) == 2:
+            first, second = connection
+            draw_primitive(SphereMesh.Capsuloid(spheres[first], spheres[second]), colour)
+        else:
+            for first, second, third in triangles:
+                draw_primitive(
+                    SphereMesh.Prysmoid(spheres[first], spheres[second], spheres[third], 1.0), colour
+                )
     return skipped
 
 

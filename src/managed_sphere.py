@@ -2,6 +2,12 @@
 import numpy as np
 import pyvista as pv
 
+# Widget tessellation matching SMFitting's SphereMesh.Sphere.buildGeometry(16, 32): 16 rings
+# from pole to pole (VTK's phi), and 31 facets around (VTK's theta) because buildGeometry's
+# 32 longitudes repeat the first one to close the seam.
+SPHERE_WIDGET_THETA_RESOLUTION = 31
+SPHERE_WIDGET_PHI_RESOLUTION = 16
+
 
 class ManagedSphere:
     def __init__(
@@ -45,9 +51,14 @@ class ManagedSphere:
             _cb,
             center=tuple(self.center),
             radius=self.radius,
+            theta_resolution=SPHERE_WIDGET_THETA_RESOLUTION,
+            phi_resolution=SPHERE_WIDGET_PHI_RESOLUTION,
             style="surface",
             test_callback=False,
         )
+        # SMFitting's views shade every primitive flat; the drag highlight follows suit.
+        self.widget.GetSphereProperty().SetInterpolationToFlat()
+        self.widget.GetSelectedSphereProperty().SetInterpolationToFlat()
         self.apply_widget_color()
 
     def set_opacity(self, opacity):
@@ -188,7 +199,7 @@ class ManagedSphere:
         self.set_radius(min_distance)
 
     def get_distance(self, point):
-        """Signed distance to sphere surface (analytic), for orphan heatmap."""
+        """Signed distance to sphere surface (analytic)."""
         return float(np.linalg.norm(np.asarray(point) - self.center) - self.radius)
 
     def delete_widget(self):

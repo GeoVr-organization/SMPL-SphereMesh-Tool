@@ -124,8 +124,9 @@ def replace_degenerate_slabs(
     A slab exists only while a plane tangent to all three spheres exists, which fails when
     the radii vary faster than the centres are spaced -- and the fit changes radii, so a
     triangle that was fine at placement can lose its face (on the female body the
-    clavicle / chest-corner triangle does). ``Trispheremesh`` then silently drops both
-    caps and the engine carries a slab that covers nothing. Replacing it by its rim cones
+    clavicle / chest-corner triangle does). The GUI's ``SphereMesh.Prysmoid`` then draws and
+    measures only its three edge capsuloids, and the engine carries a slab that covers
+    nothing beyond them. Replacing it by its rim cones
     keeps every sphere linked (the walk passes through the shared spheres) and reports
     the change instead of hiding it.
     """

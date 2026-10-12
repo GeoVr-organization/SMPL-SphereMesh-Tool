@@ -40,8 +40,10 @@ section of `TOPOLOGY_HANDOFF.md` before changing anything here.
   later. Keep design files minimal (only the varied keys).
 - Fit offset caps must be anchored to the original placement, or refits compound.
 - A posed pop-out of about 46 mm is the GUI's rigid-binding floor, not a placement bug.
-- The GUI's `spheremesh_distance` / `get_distance` is wrong; use `bumpers.py`.
-  `sdf_torch.py` is its autograd port.
+- Measure with `bumpers.py`; `sdf_torch.py` is its autograd port. Since 2026-10-12 the
+  GUI's `get_distance` and `sphere_fit.spheremesh_distance` use `src/sphere_mesh.py`,
+  which agrees with `bumpers.py` to 1e-9 m. Before that both were approximate, so
+  fidelity numbers measured with them earlier are not comparable.
 - A sphere centred exactly on a joint binds non-deterministically.
 - `spine1` and `neck` are nearly dead joints.
 - Use mesh-plane sections (`sections.py`), not vertex bands.

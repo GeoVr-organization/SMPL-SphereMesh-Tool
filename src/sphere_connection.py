@@ -1,9 +1,30 @@
-"""Connection between 2 or 3 spheres: connector geometry + Spheremesh / Trispheremesh actor."""
+"""Connection between 2 or 3 spheres: thin connector plus its capsuloid / prysmoid surface.
+
+The surface and the distances come from src/sphere_mesh.py, the SphereMesh class shared
+with SMFitting: a cone is a SphereMesh.Capsuloid, a triangle a SphereMesh.Prysmoid. Both
+cache their axis and planes when they are built, so a fresh one is built from the spheres'
+current centres and radii for every update and every distance query.
+"""
 import numpy as np
 import pyvista as pv
-from src.spheremesh import Spheremesh, Trispheremesh
 
-from src.utils import measure_time
+from src.sphere_mesh import SphereMesh
+
+# buildGeometry() subdivisions. A cone's side is straight along its axis, so 2 rows give
+# the very surface the SMFitting views draw with their default 16 at an eighth of the
+# triangles; 32 around matches their default.
+SPHEREMESH_NUM_THETA = 2
+SPHEREMESH_NUM_PHI = 32
+
+# Metres. Two sphere centres closer than this make a connection meaningless; Add
+# Connection and Divide refuse to create one.
+COINCIDENT_CENTER_TOLERANCE = 1e-9
+
+
+def triangles_to_faces(triangles: np.ndarray) -> np.ndarray:
+    """(T, 3) triangle indices as a flat VTK faces array: 3, a, b, c per triangle."""
+    triangles = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+    return np.hstack([np.full((len(triangles), 1), 3, dtype=np.int64), triangles]).ravel()
 
 
 class SphereConnection:
@@ -27,6 +48,8 @@ class SphereConnection:
         self._plotter = plotter
         self._sphere_indices = sphere_indices
         self._manager = manager
+        # The drawn surface (pv.PolyData); None until first built, and when the geometry
+        # is invalid (coincident centres) - _build_connection relies on that.
         self.spheremesh = None
 
         self._opacity = opacity
@@ -54,14 +77,41 @@ class SphereConnection:
         if len(new_indices) not in (2, 3):
             raise ValueError("SphereConnection requires 2 or 3 sphere indices")
         self._sphere_indices = new_indices
+        # The rebuilt connector keeps the old one's visibility ("Show sphere widgets").
+        connector_was_visible = True
         if self._connector_actor is not None:
+            connector_was_visible = bool(self._connector_actor.GetVisibility())
             self._plotter.remove_actor(self._connector_actor)
             self._connector_actor = None
         self._build_connector()
+        self.set_connector_visibility(connector_was_visible)
         self.update_mesh()
 
     def _spheres(self):
         return [self._manager.spheres[i] for i in self._sphere_indices]
+
+    def build_primitive(self):
+        """A fresh SphereMesh.Capsuloid / Prysmoid over the spheres' current centres and radii.
+
+        Each SphereMesh.Sphere carries the tool's sphere index, so the primitive orders its
+        spheres, and names them in its warnings, the way the tool numbers them.
+        """
+        primitive_spheres = [
+            SphereMesh.Sphere(sphere_index, managed_sphere.get_center(), managed_sphere.get_radius())
+            for sphere_index, managed_sphere in zip(self._sphere_indices, self._spheres())
+        ]
+        if len(primitive_spheres) == 2:
+            return SphereMesh.Capsuloid(*primitive_spheres)
+        return SphereMesh.Prysmoid(*primitive_spheres, 1.0)
+
+    def has_coincident_centers(self) -> bool:
+        """Whether two of the connection's sphere centres coincide."""
+        endpoint_centers = [managed_sphere.get_center() for managed_sphere in self._spheres()]
+        return any(
+            np.linalg.norm(endpoint_centers[first] - endpoint_centers[second]) < COINCIDENT_CENTER_TOLERANCE
+            for first in range(len(endpoint_centers))
+            for second in range(first + 1, len(endpoint_centers))
+        )
 
     def _build_tri_prismoid_mesh(self, c0, c1, c2, half_thickness=0.0025):
         """Centered triangular prism from triangle (c0,c1,c2)."""
@@ -100,6 +150,8 @@ class SphereConnection:
                     opacity=self._opacity,
                     smooth_shading=True,
                 )
+        if self._connector_actor is not None:
+            self._manager.notify_actor_created(self._connector_actor)
 
     def set_connector_visibility(self, visible):
         if self._connector_actor is not None:
@@ -138,13 +190,6 @@ class SphereConnection:
                 pickable_actors.append(spheremesh_actor)
         return pickable_actors
 
-    def _set_actor_mesh(self, actor, mesh, color, smooth_shading=True):
-        mapper = actor.GetMapper()
-        data = getattr(mesh, "_vtk_obj", getattr(mesh, "VTKObject", mesh))
-        mapper.SetInputData(data)
-        actor.GetProperty().SetColor(pv.Color(color).float_rgb)
-        actor.GetProperty().SetOpacity(self._opacity)
-
     def _update_connector(self):
         if self._connector_actor is None:
             return
@@ -162,75 +207,47 @@ class SphereConnection:
                 mesh_vtk = getattr(prismoid, "_vtk_obj", getattr(prismoid, "VTKObject", prismoid))
                 self._connector_actor.GetMapper().SetInputData(mesh_vtk)
 
-    def _build_pair_mesh(self, color):
-        S = self._spheres()
-        c1 = tuple(S[0].get_center())
-        r1 = S[0].get_radius()
-        c2 = tuple(S[1].get_center())
-        r2 = S[1].get_radius()
-        try:
-            if self.spheremesh is not None and len(self._actors) > 0:
-                self.spheremesh.update(c1, r1, c2, r2)
-                actor = self._actors[0]
-                actor.GetProperty().SetColor(pv.Color(color).float_rgb)
-                actor.GetProperty().SetOpacity(self._opacity)
-                if self._spheremesh_visible:
-                    actor.SetVisibility(True)
-            else:
-                self.spheremesh = Spheremesh(
-                    center1=c1, radius1=r1, center2=c2, radius2=r2, resolution=32
-                )
-                actor = self._plotter.add_mesh(
-                    self.spheremesh, color=color, opacity=self._opacity, smooth_shading=True
-                )
-                self._actors.append(actor)
-                self._actors[0].SetVisibility(bool(self._spheremesh_visible))
-        except ValueError as e:
-            print(f"Could not update Spheremesh for pair: {e}")
-
-    def _build_triple_mesh(self, color):
-        S = self._spheres()
-        c1 = tuple(S[0].get_center())
-        r1 = S[0].get_radius()
-        c2 = tuple(S[1].get_center())
-        r2 = S[1].get_radius()
-        c3 = tuple(S[2].get_center())
-        r3 = S[2].get_radius()
-        try:
-            if self.spheremesh is not None and len(self._actors) > 0:
-                self.spheremesh.update(c1, r1, c2, r2, c3, r3)
-                actor = self._actors[0]
-                actor.GetProperty().SetColor(pv.Color(color).float_rgb)
-                actor.GetProperty().SetOpacity(self._opacity)
-                if self._spheremesh_visible:
-                    actor.SetVisibility(True)
-            else:
-                self.spheremesh = Trispheremesh(
-                    center1=c1, radius1=r1, center2=c2, radius2=r2, center3=c3, radius3=r3, resolution=32
-                )
-                actor = self._plotter.add_mesh(
-                    self.spheremesh, color=color, opacity=self._opacity, smooth_shading=True
-                )
-                self._actors.append(actor)
-                self._actors[0].SetVisibility(bool(self._spheremesh_visible))
-        except ValueError as e:
-            print(f"Could not update Trispheremesh for triple: {e}")
-
     def _build_and_update_meshes(self):
-        color = self._current_mesh_color()
-        if len(self._sphere_indices) == 2:
-            self._build_pair_mesh(color)
-        else:
-            self._build_triple_mesh(color)
+        """Rebuild the primitive from the current spheres and draw its buildGeometry() surface.
+
+        The first build adds the actor; later ones overwrite the same PolyData in place, so
+        the mapper, the clip planes and the pick list keep pointing at it. Coincident centres
+        leave a connection that never had a surface without one.
+        """
+        if self.spheremesh is None and self.has_coincident_centers():
+            print(f"Could not build spheremesh for {self._sphere_indices}: two sphere centres coincide")
+            return
+        vertices, triangles = self.build_primitive().buildGeometry(SPHEREMESH_NUM_THETA, SPHEREMESH_NUM_PHI)
+        color_rgb = pv.Color(self._current_mesh_color()).float_rgb
+
+        if self.spheremesh is None:
+            self.spheremesh = pv.PolyData(vertices, triangles_to_faces(triangles))
+            actor = self._plotter.add_mesh(
+                self.spheremesh, color=color_rgb, opacity=self._opacity, smooth_shading=False
+            )
+            # SMFitting's views shade every primitive flat.
+            actor.GetProperty().SetInterpolationToFlat()
+            actor.SetVisibility(bool(self._spheremesh_visible))
+            self._actors.append(actor)
+            self._manager.notify_actor_created(actor)
+            return
+
+        self.spheremesh.points = vertices
+        # A prysmoid that gains or loses its tangent faces changes its triangle count.
+        if self.spheremesh.n_cells != len(triangles):
+            self.spheremesh.faces = triangles_to_faces(triangles)
+        self.spheremesh.Modified()
+        actor = self._actors[0]
+        actor.GetProperty().SetColor(color_rgb)
+        actor.GetProperty().SetOpacity(self._opacity)
+        if self._spheremesh_visible:
+            actor.SetVisibility(True)
 
     def update_mesh(self):
-        
+        """Follow the spheres: the connector always, the surface while it is shown."""
         if self._spheremesh_visible:
-            #measure_time(lambda:self._build_and_update_meshes(),label="build_and_update_meshes")
             self._build_and_update_meshes()
-        else:
-            #measure_time(lambda:self._update_connector(),label="update_connector")
-            self._update_connector()
+        self._update_connector()
 
     def set_visibility(self, visible):
         self._spheremesh_visible = visible
@@ -271,8 +288,9 @@ class SphereConnection:
         self.spheremesh = None
 
     def get_distance(self, point):
-        if self.spheremesh is None:
-            self._build_and_update_meshes()
-        if self.spheremesh is None:
-            return float("inf")
-        return self.spheremesh.get_distance(point)
+        """Signed distance from point to the connection's capsuloid / prysmoid (negative inside)."""
+        return self.build_primitive().signedDistance(np.asarray(point, dtype=np.float64))
+
+    def get_distances(self, points):
+        """get_distance() for every row of an (N, 3) array at once."""
+        return self.build_primitive().signedDistances(np.asarray(points, dtype=np.float64))

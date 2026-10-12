@@ -3,7 +3,7 @@ SphereManager: flat list of ManagedSphere + SphereConnection objects.
 
 SphereManager: spheres, connections, selection, load/save, FK.
 ManagedSphere: per-sphere widget and kinematic data.
-SphereConnection: connectors + Spheremesh / Trispheremesh actors.
+SphereConnection: connectors + capsuloid / prysmoid actors (src/sphere_mesh.py).
 """
 from __future__ import annotations
 
@@ -27,11 +27,11 @@ from src.utils import measure_time
 
 JSON_VERSION = 2
 
-# "Class Colors" scheme: one color per primitive kind, measured from the lit faces of the
-# reference renders.
-SPHERE_CLASS_COLOR = "#ec191b"      # red: spheres
-CAPSULOID_CLASS_COLOR = "#357db9"   # blue: capsuloids (cones between 2 spheres)
-PRYSMOID_CLASS_COLOR = "#9449d1"    # violet: prysmoids (slabs between 3 spheres)
+# "Class Colors" scheme: one color per primitive kind, the primitiveColors of SMFitting's
+# views (PlotlyView.py, SphereMeshView.py). The tool starts in this scheme.
+SPHERE_CLASS_COLOR = "#ee380a"      # red: spheres
+CAPSULOID_CLASS_COLOR = "#2f76b9"   # blue: capsuloids (cones between 2 spheres)
+PRYSMOID_CLASS_COLOR = "#9545d6"    # violet: prysmoids (slabs between 3 spheres)
 
 # ---------------------------------------------------------------------------
 # Beta-offset constants
@@ -61,8 +61,9 @@ class SphereManager:
         self.sphere_widgets_visible = True
         self.spheremesh_opacity = 0.5
         self.spheremesh_toggle_callback = None
-        self.show_heatmap = False
-        self.show_heatmap_callback = None
+        # Called with every VTK actor a connection creates after load (lazy spheremesh
+        # actors, re-indexed connectors), so MainWindow can give it the active clip planes.
+        self.actor_created_callback = None
         self.skeleton = None
         self.rest_skeleton = None
         self.skinning_weights = None   # (N_verts, N_joints) float array from SMPL model
@@ -79,7 +80,7 @@ class SphereManager:
         self.locked_color = "yellow"
         self.locked_selected_color = "orange"
         # "default", "random" or "class". Spheres and connections created later follow it.
-        self.color_scheme = "default"
+        self.color_scheme = "class"
 
         self._uniform_radius_override_active = False
         self._uniform_radius_value = 1.0
@@ -168,6 +169,11 @@ class SphereManager:
 
     def set_spheremesh_toggle_callback(self, callback):
         self.spheremesh_toggle_callback = callback
+
+    def notify_actor_created(self, actor) -> None:
+        """Pass an actor a connection just added to the plotter on to actor_created_callback."""
+        if self.actor_created_callback is not None:
+            self.actor_created_callback(actor)
 
     def set_lock_button_callback(self, callback):
         self.lock_button_callback = callback
@@ -340,6 +346,7 @@ class SphereManager:
                 sp.set_radius_force(base * self._uniform_radius_value)
             else:
                 sp.set_radius_force(self._uniform_radius_value)
+        self._refresh_all_connection_meshes()
 
     def add_sphere(
         self,
@@ -468,18 +475,23 @@ class SphereManager:
 
     def _delete_sphere_at_index(self, i: int):
         """Remove sphere i, drop every connection that includes i, reindex other connections."""
-        new_connections: List[SphereConnection] = []
+        surviving_connections: List[SphereConnection] = []
         for c in self.connections:
             if i in c.sphere_indices:
                 c.delete()
                 continue
-            new_idxs = tuple(j if j < i else j - 1 for j in c.sphere_indices)
-            c.set_sphere_indices(new_idxs)
-            new_connections.append(c)
-        self.connections = new_connections
+            surviving_connections.append(c)
+        self.connections = surviving_connections
 
         self.spheres[i].delete_widget()
         del self.spheres[i]
+
+        # Only now: set_sphere_indices rebuilds the geometry from self.spheres, which must
+        # already be the shortened list the new indices point into.
+        for connection in surviving_connections:
+            connection.set_sphere_indices(
+                tuple(j if j < i else j - 1 for j in connection.sphere_indices)
+            )
 
         if self._uniform_radius_override_active:
             remapped: Dict[int, float] = {}
@@ -1379,30 +1391,35 @@ class SphereManager:
                 s.add(i)
         return s
 
-    def get_heatmap(self, mesh):
-        heatmap = np.zeros(mesh.n_points)
-        heatmap[:] = np.inf
+    def get_heatmap(self, mesh) -> np.ndarray:
+        """Signed distance in metres from every mesh vertex to the sphere-mesh, negative inside.
 
-        in_conn = self._indices_in_any_connection()
-        i = 0
-        total = mesh.n_points
-        for point in mesh.points:
-            min_distance = np.inf
-            for c in self.connections:
-                d = c.get_distance(point)
-                if abs(d) < abs(min_distance):
-                    min_distance = d
-            for j in range(len(self.spheres)):
-                if j not in in_conn:
-                    d = self.spheres[j].get_distance(point)
-                    if abs(d) < abs(min_distance):
-                        min_distance = d
-            heatmap[i] = np.sign(min_distance) * np.log1p(abs(min_distance))
-            if i % 500 == 0 or i == total - 1:
-                print(f"\rProcessing {i}/{total}", end="", flush=True)
-            i += 1
+        The plain minimum over every connection's capsuloid / prysmoid, the d that
+        SMFitting's SphereMesh.closestSphere() reports. Spheres in no connection count as
+        spheres, which SMFitting's meshes never have but a template edited here can.
+        """
+        points = np.asarray(mesh.points, dtype=np.float64)
+        distances = np.full(len(points), np.inf)
+        for connection in self.connections:
+            np.minimum(distances, connection.get_distances(points), out=distances)
+        in_any_connection = self._indices_in_any_connection()
+        for sphere_index, sphere in enumerate(self.spheres):
+            if sphere_index not in in_any_connection:
+                lone_sphere_distances = np.linalg.norm(points - sphere.get_center(), axis=1) - sphere.get_radius()
+                np.minimum(distances, lone_sphere_distances, out=distances)
+        return distances
 
-        return heatmap
+    def geometry_fingerprint(self) -> int:
+        """A hash of every sphere's centre and radius and every connection's indices.
+
+        Equal fingerprints mean nothing a distance query depends on has changed, which is
+        how MainWindow decides whether the heatmap is stale.
+        """
+        sphere_state = np.array(
+            [[*sphere.get_center(), sphere.get_radius()] for sphere in self.spheres], dtype=np.float64
+        )
+        connection_state = tuple(connection.sphere_indices for connection in self.connections)
+        return hash((sphere_state.tobytes(), connection_state))
 
     # ---------------------------------------------------------------------------
     # Geometric sphere fitting

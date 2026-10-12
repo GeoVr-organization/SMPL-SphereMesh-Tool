@@ -16,7 +16,7 @@ The objective is
     a(j)    = argmin_i |v_j - c_i|,  discarded when |v_j - c_a(j)| > beta * r_a(j)
 
 subject to |c_i - c_i^input| <= delta and r_min <= r_i <= r_max. The sign convention is the
-one used throughout the repository (Spheremesh.get_distance, ManagedSphere.get_distance):
+one used throughout the repository (SphereMesh.signedDistance, ManagedSphere.get_distance):
 positive means the point lies outside the sphere. kappa is protrusion_weight and beta is
 assign_radius_scale.
 
@@ -119,19 +119,15 @@ top of it, so that the effect of delta stays readable from the results.
 Deviation from the brief
 ------------------------
 The specification asks for the full-metric column to import spheremesh_distance from
-scripts/fit_beta_offsets.py. That script does not exist on this branch, so
-spheremesh_distance here is a fresh vectorised mirror of Spheremesh.get_distance and
-Trispheremesh.get_distance in src/spheremesh.py: minimum over every sphere and every
-tapered segment, with segment distance taken as the clamped point-segment distance minus
-the linearly interpolated radius. Like Trispheremesh.get_distance it evaluates the
-triangular slab not at all -- triples contribute their three edges only. If
-fit_beta_offsets.py is later merged, this function should be deleted in favour of it
-rather than the two being maintained side by side.
+scripts/fit_beta_offsets.py. That script does not exist on this branch.
+spheremesh_distance was first written here as a vectorised mirror of the GUI's old
+approximate cone distance (clamped point-segment distance minus the interpolated radius,
+triangles reduced to their three edges). Since 2026-10-12 it is the exact SphereMesh
+distance of src/sphere_mesh.py instead, slabs included, on the user's decision to make the
+tool calculate like that class. The "RMS full" figures quoted above were measured with the
+old approximation and are not comparable with runs after that change.
 
-Note also that SphereManager.get_heatmap selects the minimum by *absolute* value, which is
-a different quantity from the union signed distance used here (plain signed minimum). The
-two agree in sign but not in magnitude wherever a point is inside one primitive and near
-the surface of another.
+SphereManager.get_heatmap uses the same union signed distance (plain signed minimum).
 
 Consequences of this approach
 -----------------------------
@@ -214,6 +210,8 @@ import math
 import warnings
 
 import numpy as np
+
+from src.sphere_mesh import SphereMesh
 
 __all__ = [
     "sphere_signed_distances",
@@ -354,63 +352,28 @@ def spheres_only_distance(
     return np.min(sphere_signed_distances(points, centers, radii), axis=1)
 
 
-def _segment_pairs(connections) -> np.ndarray:
-    """Every sphere index pair implied by the connection list, deduplicated.
-
-    A 2-connection contributes its single pair; a 3-connection contributes its three
-    edges, mirroring Trispheremesh.get_distance, which decomposes the triangle into edges
-    and never evaluates the slab.
-    """
-    pairs: set[tuple[int, int]] = set()
-    for connection in connections:
-        indices = tuple(int(i) for i in connection)
-        for position, first in enumerate(indices):
-            for second in indices[position + 1:]:
-                pairs.add((first, second) if first < second else (second, first))
-    if not pairs:
-        return np.zeros((0, 2), dtype=np.int64)
-    return np.array(sorted(pairs), dtype=np.int64)
-
-
 def spheremesh_distance(
     points: np.ndarray,
     centers: np.ndarray,
     radii: np.ndarray,
     connections=None,
 ) -> np.ndarray:
-    """Signed distance to the union of spheres and tapered segments.
+    """Signed distance to the union of the spheres and their capsuloids and prysmoids.
 
-    Vectorised mirror of Spheremesh.get_distance / Trispheremesh.get_distance. The segment
-    term is the clamped point-to-segment distance minus the radius interpolated linearly in
-    the clamped parameter, which is the approximation the interactive tool already uses for
-    its cones. Passing connections=None degrades to the spheres-only metric.
+    The capsuloid and prysmoid terms are SphereMesh.signedDistances from
+    src/sphere_mesh.py, the implementation the GUI renders and measures with: the exact
+    distance to each cone (tangent cone between its two spheres) and each triangular slab
+    (tangent planes plus edge cones). The spheres term keeps spheres that belong to no
+    connection in the union. Passing connections=None degrades to the spheres-only metric.
     """
     points = np.ascontiguousarray(points, dtype=np.float64)
     centers = np.ascontiguousarray(centers, dtype=np.float64)
     radii = np.ascontiguousarray(radii, dtype=np.float64)
     best = spheres_only_distance(points, centers, radii)
-    if connections is None:
+    if connections is None or len(connections) == 0:
         return best
-    pairs = _segment_pairs(connections)
-    if pairs.shape[0] == 0:
-        return best
-    start = centers[pairs[:, 0]]
-    end = centers[pairs[:, 1]]
-    radius_start = radii[pairs[:, 0]]
-    radius_end = radii[pairs[:, 1]]
-    axis = end - start
-    axis_squared = np.einsum("pk,pk->p", axis, axis)
-    degenerate_axis = axis_squared < 1e-12
-    safe_axis_squared = np.where(degenerate_axis, 1.0, axis_squared)
-    to_point = points[:, None, :] - start[None, :, :]
-    parameter = np.einsum("mpk,pk->mp", to_point, axis) / safe_axis_squared[None, :]
-    parameter = np.clip(parameter, 0.0, 1.0)
-    parameter = np.where(degenerate_axis[None, :], 0.0, parameter)
-    offset = to_point - parameter[:, :, None] * axis[None, :, :]
-    segment_distance = np.sqrt(np.einsum("mpk,mpk->mp", offset, offset)) - (
-        radius_start[None, :] + parameter * (radius_end - radius_start)[None, :]
-    )
-    return np.minimum(best, np.min(segment_distance, axis=1))
+    sphere_mesh = SphereMesh.fromSpheresAndConnections(centers, radii, connections)
+    return np.minimum(best, sphere_mesh.signedDistances(points))
 
 
 def select_band(

@@ -17,8 +17,9 @@ paths:
   - Drive features through the `MainWindow` handler (for example
     `window.divide_connection_clicked()`), not only the manager, so the UI wiring is
     tested too.
-- **Topology tests:** pin behaviour against brute force. Exact distances come from
-  `src/topology/bumpers.py`, never `SphereConnection.get_distance`.
+- **Topology tests:** pin behaviour against brute force. Take the reference distances from
+  `src/topology/bumpers.py`: it is exact and independent of `src/sphere_mesh.py`, which
+  the GUI and `SphereConnection.get_distance` use.
 - **Isolation:**
   - Write files to `tempfile.TemporaryDirectory()`, never into `data/`.
   - Reset global state you changed: clip planes, Inflate, beta offsets, theta.

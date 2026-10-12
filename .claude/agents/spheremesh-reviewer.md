@@ -1,6 +1,6 @@
 ---
 name: spheremesh-reviewer
-description: Reviews pending changes to the sphere-mesh editor (src/sphere_manager.py, src/ui_widgets.py, src/sphere_connection.py, src/managed_sphere.py, src/spheremesh.py and their test scripts) against this project's invariants. It checks index stability, selection exclusivity, Inflate base radii, beta-offset alignment, mirror/twin handling, clip planes, the unsaved flag, rigid binding, VTK event pitfalls and naming style. Use proactively after implementing or modifying an editing feature, before reporting it as done. Read-only.
+description: Reviews pending changes to the sphere-mesh editor (src/sphere_manager.py, src/ui_widgets.py, src/sphere_connection.py, src/managed_sphere.py, src/sphere_mesh.py and their test scripts) against this project's invariants. It checks index stability, selection exclusivity, Inflate base radii, beta-offset alignment, mirror/twin handling, clip planes, the unsaved flag, rigid binding, VTK event pitfalls and naming style. Use proactively after implementing or modifying an editing feature, before reporting it as done. Read-only.
 tools: Read, Grep, Glob, PowerShell, Bash
 model: inherit
 ---
@@ -36,7 +36,7 @@ project's invariants. You never edit files. You report findings.
 - **Binding:** rigid single-joint FK stays consistent. No bumper is bound across a third
   joint. Rest frame versus current pose is used correctly.
 - **Geometry:** degenerate cases are validated before mutating, with rollback on failure.
-  No reliance on the approximate `get_distance` where exactness matters.
+  No `SphereMesh` primitive is kept across sphere edits (they cache their geometry).
 - **VTK and Qt:**
   - Observer priorities and press/release routing.
   - Paused widgets are always restored.

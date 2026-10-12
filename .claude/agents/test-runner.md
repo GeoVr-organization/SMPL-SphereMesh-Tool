@@ -14,7 +14,8 @@ If the caller names tests, run exactly those. Otherwise list the changed files w
 
 | Changed | Run |
 | --- | --- |
-| `src/sphere_manager.py`, `src/ui_widgets.py`, `src/sphere_connection.py`, `src/managed_sphere.py`, `src/spheremesh.py` | `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `main.py --selftest` |
+| `src/sphere_manager.py`, `src/ui_widgets.py`, `src/sphere_connection.py`, `src/managed_sphere.py` | `scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `main.py --selftest` |
+| `src/sphere_mesh.py`, `SMFitting/SphereMesh.py` | `scripts/test_sphere_mesh.py`, `scripts/test_spheremesh_port.py`, `scripts/test_sphere_fit.py` |
 | `src/sphere_fit.py` | `scripts/test_sphere_fit.py`, `scripts/test_sphere_fit_inflation.py`, `scripts/test_fit_spheres_ui.py` |
 | `src/topology/**` | `scripts/test_topology_{bumpers,sdf_torch,sections,validate,roundtrip,fit}.py` |
 | `scripts/json2txt.py`, `scripts/txt2json.py` | `scripts/test_topology_roundtrip.py` |

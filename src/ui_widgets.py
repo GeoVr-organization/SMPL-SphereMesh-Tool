@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pyvista as pv
 import vtk
-from matplotlib.colors import LinearSegmentedColormap
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedLayout, QHBoxLayout, QSlider, QLabel, QPushButton, QCheckBox, QComboBox, QMenuBar, QMenu, QGroupBox, QDoubleSpinBox, QSpinBox, QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QScrollArea, QListWidget, QLineEdit, QPlainTextEdit, QButtonGroup
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
@@ -56,6 +55,22 @@ CONNECTION_CLICK_MAX_MOVEMENT_PIXELS = 5
 # vtkCellPicker tolerance as a fraction of the window diagonal; connector tubes are thin.
 CONNECTION_PICK_TOLERANCE = 0.005
 
+# Heatmap in the style of SMFitting's DistanceHeatmapSurface (SMFitting/ObjMesh.py): flat
+# bands symmetric about 0, cool where the body is inside the sphere-mesh (the spheres stick
+# out through it) and warm outside, meeting at 0 with a hard break so even a tiny d shows
+# its sign.
+HEATMAP_DISTANCE_LIMIT_MM = 20.0   # mm; the colour scale spans +-this
+HEATMAP_BAND_WIDTH_MM = 5.0        # mm; each band is one flat colour this wide
+HEATMAP_INSIDE_COLOR_ANCHORS = ("#8ee8f2", "#2fa4e7", "#1f5fd0", "#0d2a85")   # cyan near 0 -> dark blue
+HEATMAP_OUTSIDE_COLOR_ANCHORS = ("#ffe45c", "#ffa63d", "#e8492e", "#8c1010")  # yellow near 0 -> dark red
+# Above +limit a vertex is out of tolerance; below -limit it stays in the deepest blue.
+HEATMAP_CUTOFF_COLOR = "#4a4a4a"
+# Nearly flat lighting while the heatmap shows, so a band reads as one colour all round.
+HEATMAP_AMBIENT = 0.85
+HEATMAP_DIFFUSE = 0.2
+HEATMAP_SCALARS_NAME = "heatmap"
+HEATMAP_CUTOFF_TEXT_NAME = "heatmap_cutoff_text"
+
 _RANDOM_POSE_CSV = data_file("random_pose.csv")
 
 
@@ -67,6 +82,39 @@ def _random_pose_csv_column_order():
         for d in range(3):
             cols.append(f"theta_{jn}_{d}")
     return cols
+
+
+def _sample_color_ramp(anchors, count):
+    """count float RGB colours evenly spaced along the hex anchors (SMFitting's sampleColorRamp)."""
+    anchor_rgb = np.array([pv.Color(anchor).float_rgb for anchor in anchors])
+    positions = np.linspace(0.0, len(anchors) - 1, count)
+    colors = []
+    for position in positions:
+        lower = min(int(position), len(anchors) - 2)
+        fraction = position - lower
+        colors.append(tuple((1 - fraction) * anchor_rgb[lower] + fraction * anchor_rgb[lower + 1]))
+    return colors
+
+
+def _build_heatmap_lookup_table() -> pv.LookupTable:
+    """The heatmap's banded lookup table over +-HEATMAP_DISTANCE_LIMIT_MM.
+
+    One table entry per band, deepest blue ... cyan | yellow ... dark red, so VTK's linear
+    mapping puts each band edge on a multiple of HEATMAP_BAND_WIDTH_MM and 0 on the break
+    between cool and warm. Above the range is the cutoff grey. Below it VTK clamps to the
+    first entry, so it stays deepest blue without a below-range swatch in the legend,
+    as in SMFitting's colour bar.
+    """
+    band_count = max(1, int(round(HEATMAP_DISTANCE_LIMIT_MM / HEATMAP_BAND_WIDTH_MM)))
+    inside_bands = _sample_color_ramp(HEATMAP_INSIDE_COLOR_ANCHORS, band_count)
+    outside_bands = _sample_color_ramp(HEATMAP_OUTSIDE_COLOR_ANCHORS, band_count)
+    band_colors = inside_bands[::-1] + outside_bands
+    band_rgba = np.array([[*band_color, 1.0] for band_color in band_colors]) * 255.0
+    return pv.LookupTable(
+        values=np.round(band_rgba).astype(np.uint8),
+        scalar_range=(-HEATMAP_DISTANCE_LIMIT_MM, HEATMAP_DISTANCE_LIMIT_MM),
+        above_range_color=HEATMAP_CUTOFF_COLOR,
+    )
 
 
 def _slider_int_for_beta(v: float) -> int:
@@ -2011,6 +2059,12 @@ class MainWindow(QMainWindow):
         self._clip_plane_actors = {}  # axis -> [actor_lo, actor_hi] (visible plane meshes, no widgets)
         self._saved_interactor_style = None  # restore when clip planes are reset
 
+        # Heatmap state. The fingerprint is what the drawn colours were computed from (sphere
+        # geometry + body vertices); the lighting is the body's, restored when it turns off.
+        self._heatmap_visible = False
+        self._heatmap_fingerprint = None
+        self._body_lighting_before_heatmap = None
+
         # --- Clip Planes Panel (OVERLAY, bottom-left of 3D view) ---
         self.clip_planes_panel = ClipPlanesPanel(center_right_container)
         self.clip_planes_panel.setMinimumSize(320, 100)
@@ -2032,9 +2086,11 @@ class MainWindow(QMainWindow):
             self.info_panel.update_selected_info()
             self._sync_selected_to_joint_toolbar()
             self._sync_divide_controls()
+            self._refresh_heatmap_if_stale()
 
         # Initialize sphere manager with callback
         self.sphere_manager = SphereManager(self.plotter, _on_sphere_manager_ui_refresh)
+        self.sphere_manager.actor_created_callback = self._apply_clip_planes_to_actor
 
         # Pass SMPL LBS weights once; they are pose/shape independent.
         if hasattr(self.smpl_model, "weights") and self.smpl_model.weights is not None:
@@ -2175,14 +2231,30 @@ class MainWindow(QMainWindow):
                 return mesh.GetBounds()
         return (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
 
-    def _apply_clip_planes_to_all_actors(self):
-        """Build a vtkPlaneCollection from all active clip planes and set it on every mesh mapper."""
+    def _clip_plane_collection(self):
+        """The active clip planes as one vtkPlaneCollection (empty when none are set)."""
         collection = vtk.vtkPlaneCollection()
         for axis in ('x', 'y', 'z'):
             if axis in self._clip_planes_vtk:
                 plow, phigh = self._clip_planes_vtk[axis]
                 collection.AddItem(plow)
                 collection.AddItem(phigh)
+        return collection
+
+    def _apply_clip_planes_to_actor(self, actor):
+        """Give an actor created after the clip planes were set the same planes as the rest.
+
+        The planes are shared vtkPlane objects, so later moves of a plane reach it as well.
+        """
+        if not self._clip_planes_vtk:
+            return
+        mapper = actor.GetMapper() if hasattr(actor, 'GetMapper') else None
+        if mapper is not None and hasattr(mapper, 'SetClippingPlanes'):
+            mapper.SetClippingPlanes(self._clip_plane_collection())
+
+    def _apply_clip_planes_to_all_actors(self):
+        """Build a vtkPlaneCollection from all active clip planes and set it on every mesh mapper."""
+        collection = self._clip_plane_collection()
         for name, actor in self.plotter.actors.items():
             mapper = actor.GetMapper() if hasattr(actor, 'GetMapper') else None
             if mapper is not None and hasattr(mapper, 'SetClippingPlanes'):
@@ -2610,6 +2682,7 @@ class MainWindow(QMainWindow):
                     mesh_wrapped = pv.wrap(mesh)
                     #self.sphere_manager.update_sphere_radius(mesh_wrapped)
 
+            self._refresh_heatmap_if_stale()
             self.plotter.render()
 
     def _load_conversion_script(self, module_name: str):
@@ -2973,7 +3046,9 @@ class MainWindow(QMainWindow):
     def add_sphere_clicked(self):
         if self.sphere_manager:
             self.sphere_manager.add_sphere()
-            self.info_panel.update_selected_info()
+            # The full refresh, not just the InfoPanel: a sphere in no connection counts in
+            # the heatmap's distances, and the toolbars follow the new selection.
+            self.sphere_manager.update_sphere_information_callback()
             self.plotter.render()
 
     def _sync_selected_to_joint_toolbar(self):
@@ -3516,67 +3591,100 @@ class MainWindow(QMainWindow):
         self.plotter.render()
 
     def _on_show_heatmap(self, visible):
-        """Callback from sphere_manager: color SMPL mesh per-vertex and show/remove legend."""
+        """Colour the SMPL mesh by its signed distance to the sphere-mesh, or restore it.
+
+        Styled like SMFitting's DistanceHeatmapSurface: flat 5 mm bands over +-20 mm, cool
+        inside and warm outside, dark grey above +20 mm, with a "d [mm]" legend and a count
+        of the grey vertices. The colours stay current through _refresh_heatmap_if_stale.
+        """
         if not hasattr(self, 'mesh_actor') or self.mesh_actor is None:
             return
-        mesh_vtk = self.mesh_actor.GetMapper().GetInput()
-        mesh = pv.wrap(mesh_vtk)
         mapper = self.mesh_actor.GetMapper()
-        heatmap_title = "heatmap"
+        body_property = self.mesh_actor.GetProperty()
+        heatmap_title = "d [mm]"
+        self._heatmap_visible = bool(visible)
         if visible:
-            heat = self.sphere_manager.get_heatmap(mesh)
+            if self._body_lighting_before_heatmap is None:
+                self._body_lighting_before_heatmap = (
+                    body_property.GetAmbient(), body_property.GetDiffuse(), body_property.GetSpecular()
+                )
+            body_property.SetAmbient(HEATMAP_AMBIENT)
+            body_property.SetDiffuse(HEATMAP_DIFFUSE)
+            body_property.SetSpecular(0.0)
 
-            mesh["heatmap"] = heat
-
-            # Cut off top percentile: 95 = top 5% use "above range" (gray) color
-            percentile_cutoff =55.0
-            vmin = -0.02
-            vmax = 0.02
-
-       
-
-            # Build lookup table with 0 = green (diverging: red -> green -> blue)
-            t_zero = (0.0 - vmin) / (vmax - vmin) if vmax != vmin else 0.5
-            print(t_zero)
-            t_zero = float(np.clip(t_zero, 0.0, 1.0))
-            cmap_custom = LinearSegmentedColormap.from_list(
-                'green_at_zero',
-                [(0.0, (1, 0, 0)), (t_zero, (0, 1, 0)), (1.0, (0, 0, 1))],  # red, green at 0, blue
-                N=256,
-            )
-            lut = pv.LookupTable(cmap=cmap_custom, scalar_range=(vmin, vmax))
-            lut.SetUseAboveRangeColor(True)
-            lut.SetAboveRangeColor(0.5, 0.5, 0.5, 1.0)
-            mapper.SetScalarRange(vmin, vmax)
-            mapper.SetLookupTable(lut)
-
-            
-            mesh.Modified()
-            mapper.SetInputData(mesh_vtk)
-            mapper.SetScalarModeToUsePointData()
-            mapper.SelectColorArray("heatmap")
+            self._heatmap_fingerprint = None
+            self._refresh_heatmap_if_stale()
+            mapper.SetLookupTable(_build_heatmap_lookup_table())
+            mapper.SetScalarRange(-HEATMAP_DISTANCE_LIMIT_MM, HEATMAP_DISTANCE_LIMIT_MM)
+            mapper.SetScalarModeToUsePointFieldData()
+            mapper.SelectColorArray(HEATMAP_SCALARS_NAME)
+            # Interpolating the distance, not the colour, keeps every band edge sharp
+            # across a triangle instead of blending the two bands.
+            mapper.SetInterpolateScalarsBeforeMapping(True)
             mapper.ScalarVisibilityOn()
-            
+
             # Use plotter's remove_scalar_bar so internal state is cleared (fixes re-add on 3rd click)
             if heatmap_title in self.plotter.scalar_bars:
                 self.plotter.remove_scalar_bar(title=heatmap_title, render=False)
+            band_edge_count = 2 * int(round(HEATMAP_DISTANCE_LIMIT_MM / HEATMAP_BAND_WIDTH_MM)) + 1
             self.heatmap_scalar_bar_actor = self.plotter.add_scalar_bar(
                 title=heatmap_title,
                 mapper=mapper,
                 position_x=0.02,
                 position_y=0.5,
-                height=0.5,
-                above_label='Above cutoff',
+                height=0.45,
+                # The grey swatch alone, like SMFitting's grey cap; the count line below
+                # says what it means, and a label here would be cut by the window edge.
+                above_label="",
                 vertical=True,
-                n_labels=5,
+                n_labels=band_edge_count,
+                fmt="%+.0f",
             )
-            self.plotter.update_scalar_bar_range([vmin, vmax])
         else:
             if heatmap_title in self.plotter.scalar_bars:
                 self.plotter.remove_scalar_bar(title=heatmap_title, render=False)
+            self.plotter.remove_actor(HEATMAP_CUTOFF_TEXT_NAME, render=False)
             self.heatmap_scalar_bar_actor = None
+            self._heatmap_fingerprint = None
             mapper.ScalarVisibilityOff()
+            if self._body_lighting_before_heatmap is not None:
+                ambient, diffuse, specular = self._body_lighting_before_heatmap
+                body_property.SetAmbient(ambient)
+                body_property.SetDiffuse(diffuse)
+                body_property.SetSpecular(specular)
+                self._body_lighting_before_heatmap = None
         self.plotter.render()
+
+    def _refresh_heatmap_if_stale(self):
+        """Recompute the heatmap colours when the spheres, connections or body changed since.
+
+        Runs after every sphere-manager refresh and every pose/shape change; a selection
+        click changes nothing the distances depend on, so it costs only the fingerprint.
+        """
+        if not self._heatmap_visible or getattr(self, 'mesh_actor', None) is None:
+            return
+        body_mesh = pv.wrap(self.mesh_actor.GetMapper().GetInput())
+        fingerprint = (
+            self.sphere_manager.geometry_fingerprint(),
+            hash(np.asarray(body_mesh.points).tobytes()),
+        )
+        if fingerprint == self._heatmap_fingerprint:
+            return
+        self._heatmap_fingerprint = fingerprint
+
+        distances_mm = 1000.0 * self.sphere_manager.get_heatmap(body_mesh)
+        body_mesh.point_data[HEATMAP_SCALARS_NAME] = distances_mm
+        body_mesh.Modified()
+        cutoff_count = int(np.count_nonzero(distances_mm > HEATMAP_DISTANCE_LIMIT_MM))
+        self.plotter.add_text(
+            f"dark grey: {cutoff_count} of {len(distances_mm)} vertices "
+            f"with d > +{HEATMAP_DISTANCE_LIMIT_MM:.0f} mm",
+            position=(0.02, 0.46),
+            viewport=True,
+            font_size=9,
+            name=HEATMAP_CUTOFF_TEXT_NAME,
+            render=False,
+        )
 
     def toggle_grid(self):
         # Toggle grid visibility
