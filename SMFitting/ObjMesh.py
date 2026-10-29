@@ -154,6 +154,20 @@ def sampleColorRamp(anchors, count):
     return colors
 
 
+def heatmapBandColors(distanceLimit, bandWidth=0.005):
+    """The flat band colours of a distance heatmap, from the most negative up.
+
+    Deepest blue ... cyan | yellow ... dark red | grey. The last one is the
+    cutoff colour, for a d above distanceLimit.
+    """
+    bandCount = max(1, int(round(distanceLimit / bandWidth)))
+    return (
+        sampleColorRamp(insideColorAnchors, bandCount)[::-1]
+        + sampleColorRamp(outsideColorAnchors, bandCount)
+        + [cutoffColor]
+    )
+
+
 class DistanceHeatmapSurface:
     """A loaded .obj coloured per vertex by its signed distance.
 
@@ -176,8 +190,6 @@ class DistanceHeatmapSurface:
         self.drawWireframe = False
 
         bandCount = max(1, int(round(distanceLimit / bandWidth)))
-        insideBands = sampleColorRamp(insideColorAnchors, bandCount)
-        outsideBands = sampleColorRamp(outsideColorAnchors, bandCount)
 
         # The colour axis runs from -distanceLimit to a margin past
         # +distanceLimit, which holds the grey cutoff cap. Plotly clamps
@@ -192,7 +204,7 @@ class DistanceHeatmapSurface:
         # ... dark red | grey. Repeating each edge with the next colour
         # makes every step hard, so a band is one flat colour, not a blend.
         bandEdges = np.linspace(-distanceLimit, distanceLimit, 2 * bandCount + 1)
-        bandColors = insideBands[::-1] + outsideBands + [cutoffColor]
+        bandColors = heatmapBandColors(distanceLimit, bandWidth)
         # The grey cap is the last band, from the limit to the axis end.
         colorEdges = [axisPosition(edge) for edge in bandEdges] + [1.0]
         colorscale = []

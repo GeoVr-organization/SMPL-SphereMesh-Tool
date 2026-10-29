@@ -18,7 +18,7 @@
 
 import marimo
 
-__generated_with = "0.24.2"
+__generated_with = "0.25.2"
 app = marimo.App(width="medium")
 
 
@@ -31,7 +31,7 @@ def _(mo):
     least-squares solve of the tangency condition, and measures how close the
     result gets:
 
-    - **4** — pick a sphere mesh
+    - **4** — the input sphere mesh on its own
     - **5–7** — the input sphere mesh inside its surface, the signed distance
       of every surface vertex to it, and that distance as a heatmap
     - **8–9** — the linear system, its solution, and the sphere mesh rebuilt
@@ -40,6 +40,9 @@ def _(mo):
     - **after 11** — diagnostics (the matrix, its empty columns, distance
       statistics, the vertices whose normal disagrees with their closest
       sphere) and the save to `fitted_<name>.txt`
+    - **12** — the hernia loop: one more tangency row for every vertex still
+      over 1 cm inside the fitted sphere mesh, solved again until none is
+      left, and the save to `fitted_<name>_hernias.txt`
 
     Sections 1–3, one sphere, one capsuloid and one prysmoid on their own, are
     in `SMClasstest.py`.
@@ -62,28 +65,33 @@ def _():
     import pandas as pd
     import plotly.graph_objects as go
     import matplotlib.pyplot as plt
+    from matplotlib.colors import BoundaryNorm, ListedColormap
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     notebookDirectory = Path(__file__).parent
     if str(notebookDirectory) not in sys.path:
         sys.path.insert(0, str(notebookDirectory))
 
     from SphereMesh import SphereMesh
-    from ObjMesh import DistanceHeatmapSurface, ObjSurface, loadObjMesh
+    from ObjMesh import DistanceHeatmapSurface, ObjSurface, heatmapBandColors, loadObjMesh
     from PlotlyView import HighlightedSphere, MergedSpheres, renderPrimitives
     from scipy.sparse import lil_matrix
-    import scipy.sparse.linalg as spla
     from scipy.sparse import vstack, diags
 
 
     return (
+        BoundaryNorm,
         DistanceHeatmapSurface,
         HighlightedSphere,
+        ListedColormap,
         MergedSpheres,
         ObjSurface,
         Path,
+        Poly3DCollection,
         SphereMesh,
         diags,
         go,
+        heatmapBandColors,
         lil_matrix,
         loadObjMesh,
         mo,
@@ -91,215 +99,62 @@ def _():
         pd,
         plt,
         renderPrimitives,
-        spla,
         vstack,
     )
 
 
 @app.cell
 def _(Path):
-    # Every example file the notebook reads, keyed by the mesh names that the
-    # section 4 dropdown and fittedMesh of section 5 use.
-    sphereMeshPathsByMeshName = {
-        "bunny": "examples/bunny.txt",  # TODO da rifare il file bunny.txt
-        "smpl_arm": "examples/arm2.txt",
-        #"smpl": "examples/smol_star.txt",
-        #"smpl": "examples/SMPL_male_star.txt",
-        #"smpl": "examples/new_wp.txt",
-        "smpl": "examples/fitted_smpl.txt",
-
-    }
-    # The surface each sphere mesh was fitted to, shown from section 5 on.
-    objPathsByMeshName = {
-        "smpl_arm": "examples/arm.obj",
-        #"smpl": "examples/SMPL_male.obj",
-        "smpl": "examples/SMPL_starpose_NOcrotch.obj",
-    }
+    # The one sphere mesh the notebook works on.
+    #sphereMeshPath = "examples/smol_star.txt"
+    #sphereMeshPath = "examples/SMPL_male_star.txt"
+    #sphereMeshPath = "examples/new_wp.txt"
+    sphereMeshPath = "examples/template_male_1.0.txt"
+    # The surface it was fitted to, shown from section 5 on.
+    #objPath = "examples/SMPL_male.obj"
+    objPath = "examples/SMPL_starpose_NOcrotch.obj"
 
     #quick check if the files exist
-    for meshName, path in sphereMeshPathsByMeshName.items():
-        if not Path(path).exists():
-            raise FileNotFoundError(f"Sphere mesh file for {meshName} not found at {path}")
+    if not Path(sphereMeshPath).exists():
+        raise FileNotFoundError(f"Sphere mesh file not found at {sphereMeshPath}")
 
-    for objName, path in objPathsByMeshName.items():
-        if not Path(path).exists():
-            raise FileNotFoundError(f"OBJ file for {objName} not found at {path}")
-    return objPathsByMeshName, sphereMeshPathsByMeshName
+    if not Path(objPath).exists():
+        raise FileNotFoundError(f"OBJ file not found at {objPath}")
+    return objPath, sphereMeshPath
 
 
 @app.cell
-def _(mo):
-    numThetaSlider = mo.ui.slider(4, 48, value=16, label="numTheta", show_value=True)
-    numPhiSlider = mo.ui.slider(4, 96, value=32, label="numPhi", show_value=True)
-    opacitySlider = mo.ui.slider(
-        0.1, 1.0, step=0.05, value=1.0, label="opacity", show_value=True
-    )
-    showSpheresCheckbox = mo.ui.checkbox(value=True, label="show the constituent spheres")
-    showWireframeCheckbox = mo.ui.checkbox(value=False, label="show the wireframe")
-    showAxesCheckbox = mo.ui.checkbox(value=True, label="show the axes")
-
-    mo.vstack(
-        [
-            mo.hstack([numThetaSlider, numPhiSlider], justify="start", gap=2),
-            opacitySlider,
-            mo.hstack(
-                [showSpheresCheckbox, showWireframeCheckbox, showAxesCheckbox],
-                justify="start",
-                gap=2,
-            ),
-        ]
-    )
-    return (
-        numPhiSlider,
-        numThetaSlider,
-        opacitySlider,
-        showSpheresCheckbox,
-        showWireframeCheckbox,
-    )
+def _():
+    # Rendering parameters, shared by every plot.
+    numTheta = 16
+    numPhi = 32
+    opacity = 1.0
+    showSpheres = True  # the constituent spheres, next to the capsuloids and prysmoids
+    showWireframe = False
+    return numPhi, numTheta, opacity, showSpheres, showWireframe
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 4 — pick a sphere mesh
+    ## 4 — the sphere mesh
     """)
     return
 
 
 @app.cell
-def _(SphereMesh, np, sphereMeshPathsByMeshName):
-    # One rotation for these sphere meshes and for the .obj surfaces of section
-    # 5, so each surface stays aligned with its sphere mesh: +90 degrees about
+def _(SphereMesh, np, sphereMeshPath):
+    # One rotation for the sphere mesh and for the .obj surface of section 5,
+    # so the surface stays aligned with its sphere mesh: +90 degrees about
     # x, (x, y, z) -> (x, -z, y).
     meshRotation = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 
-    text=""
-    with open(sphereMeshPathsByMeshName["bunny"], "r") as f:
-        text = f.read()
-    bunnySM=SphereMesh()
-    bunnySM.loadFromText(text)
-
-    with open(sphereMeshPathsByMeshName["smpl"], "r") as f:
+    with open(sphereMeshPath, "r") as f:
         text = f.read()
     SmplSM=SphereMesh()
     SmplSM.loadFromText(text)
     SmplSM.rotate(meshRotation)
-
-
-    with open(sphereMeshPathsByMeshName["smpl_arm"], "r") as f:
-        text = f.read()
-    armSM=SphereMesh()
-    armSM.loadFromText(text)
-    armSM.rotate(meshRotation)
-    return SmplSM, armSM, bunnySM, meshRotation
-
-
-@app.cell
-def _(SmplSM, armSM, bunnySM, mo):
-    # The single-sphere, capsuloid and prysmoid test meshes live in
-    # SMClasstest.py now, so the picker offers only the fitted examples.
-    meshesByName = {
-        "bunny": bunnySM,
-        "smpl": SmplSM,
-        "smpl_arm": armSM,
-    }
-
-    meshSelector = mo.ui.dropdown(
-        options=list(meshesByName),
-        value="smpl",
-        label="sphere mesh",
-    )
-    showInterpolationCheckbox = mo.ui.checkbox(
-        value=False, label="Show interpolation"
-    )
-    return meshSelector, meshesByName, showInterpolationCheckbox
-
-
-@app.cell(hide_code=True)
-def _(mo, showInterpolationCheckbox):
-    # Reading the checkbox re-runs this cell on every toggle, which builds a
-    # fresh slider: turning interpolation back on always restarts from 1.
-    showInterpolationCheckbox.value
-
-    spheresPerPrimitiveSlider = mo.ui.slider(
-        0, 20, value=1, label="Spheres per primitive", show_value=True
-    )
-    return (spheresPerPrimitiveSlider,)
-
-
-@app.cell
-def _(
-    MergedSpheres,
-    meshSelector,
-    meshesByName,
-    mo,
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
-    renderPrimitives,
-    showInterpolationCheckbox,
-    showSpheresCheckbox,
-    showWireframeCheckbox,
-    spheresPerPrimitiveSlider,
-):
-    selectedMesh = meshesByName[meshSelector.value]
-
-    if showInterpolationCheckbox.value:
-        # The interpolated spheres replace the capsuloid/prysmoid surfaces,
-        # which would otherwise enclose them and hide them from view. They are
-        # kept in two groups so each keeps the colour of the primitive it was
-        # sampled from.
-        capsuloidInterpolation, prysmoidInterpolation = (
-            selectedMesh.getInterpolatedSpheresBySource(
-                spheresPerPrimitiveSlider.value
-            )
-        )
-        interpolatedSphereCount = (
-            len(capsuloidInterpolation) + len(prysmoidInterpolation)
-        )
-        selectedPrimitives = [
-            MergedSpheres(spheres, name)
-            for spheres, name in (
-                (capsuloidInterpolation, "Capsuloid Interpolation"),
-                (prysmoidInterpolation, "Prysmoid Interpolation"),
-            )
-            if spheres
-        ]
-    else:
-        interpolatedSphereCount = 0
-        selectedPrimitives = (
-            list(selectedMesh.capsuloids) + list(selectedMesh.prysmoids)
-        )
-
-    # Spheres are all a single-sphere mesh has, so never leave the plot empty.
-    if showSpheresCheckbox.value or not selectedPrimitives:
-        selectedPrimitives = list(selectedMesh.spheres) + selectedPrimitives
-
-    selectedFigure = renderPrimitives(
-        selectedPrimitives,
-        None,
-        numThetaSlider.value,
-        numPhiSlider.value,
-        opacitySlider.value,
-        showWireframeCheckbox.value,
-        showAxes=False,
-        showLegend=False,
-        backgroundColor="#1d252b",
-        # Re-frames on a new mesh, but holds the camera through slider changes.
-        uiRevision=meshSelector.value,
-    )
-
-    controlItems = [mo.md("**Sphere mesh**"), meshSelector, showInterpolationCheckbox]
-    if showInterpolationCheckbox.value:
-        controlItems += [
-            spheresPerPrimitiveSlider,
-            mo.md(f"{interpolatedSphereCount} interpolated spheres"),
-        ]
-    selectorControls = mo.vstack(controlItems)
-    mo.hstack(
-        [selectorControls, selectedFigure], widths=[1, 3], align="start", gap=2
-    )
-    return
+    return SmplSM, meshRotation
 
 
 @app.cell(hide_code=True)
@@ -311,17 +166,15 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(loadObjMesh, meshRotation, meshesByName, objPathsByMeshName):
-    # The one example every block from here to the end shows. Change the name
-    # to switch: it picks both the sphere mesh and the surface it was fitted to.
+def _(SmplSM, loadObjMesh, meshRotation, objPath):
+    # The sphere mesh every block from here to the end shows, and the surface it
+    # was fitted to. The name labels the plots and names the saved fit.
     fittedMesh = "smpl"
 
-    spheremesh = meshesByName[fittedMesh]
-    _objVertices, mesh_triangles, _objNormals = loadObjMesh(
-        objPathsByMeshName[fittedMesh]
-    )
-    # The rotation section 4 gave the sphere meshes, so the surface stays
-    # aligned with them. The rows are points, hence the transpose; a rotation
+    spheremesh = SmplSM
+    _objVertices, mesh_triangles, _objNormals = loadObjMesh(objPath)
+    # The rotation section 4 gave the sphere mesh, so the surface stays
+    # aligned with it. The rows are points, hence the transpose; a rotation
     # carries normals exactly as it carries points, and keeps the winding.
     mesh_vertices = _objVertices @ meshRotation.T
     mesh_normals = _objNormals @ meshRotation.T
@@ -341,7 +194,7 @@ def _(mo):
     )
     # While a vertex is being queried everything but the answer is context, and
     # these two say how far each half of it fades back. They stand in for
-    # surfaceOpacitySlider and the notebook-wide opacity slider, which is why
+    # surfaceOpacitySlider and the notebook-wide opacity, which is why
     # the surface one is hidden below while this mode is on.
     closestSphereMeshOpacitySlider = mo.ui.slider(
         0.0, 1.0, step=0.05, value=0.6,
@@ -397,13 +250,13 @@ def _(
     mesh_triangles,
     mesh_vertices,
     mo,
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
+    numPhi,
+    numTheta,
+    opacity,
     renderPrimitives,
     showClosestSphereCheckbox,
-    showSpheresCheckbox,
-    showWireframeCheckbox,
+    showSpheres,
+    showWireframe,
     spheremesh,
     surfaceOpacitySlider,
     surfaceShowInterpolationCheckbox,
@@ -433,7 +286,7 @@ def _(
             list(spheremesh.capsuloids) + list(spheremesh.prysmoids)
         )
 
-    if showSpheresCheckbox.value or not fittedPrimitives:
+    if showSpheres or not fittedPrimitives:
         fittedPrimitives = list(spheremesh.spheres) + fittedPrimitives
 
     # Everything drawn so far is context for the query below, so it is dimmed
@@ -442,7 +295,7 @@ def _(
     contextOpacity = (
         closestSphereMeshOpacitySlider.value
         if showClosestSphereCheckbox.value
-        else opacitySlider.value
+        else opacity
     )
     shellOpacity = (
         closestSurfaceOpacitySlider.value
@@ -472,10 +325,10 @@ def _(
     fittedFigure = renderPrimitives(
         fittedPrimitives,
         None,
-        numThetaSlider.value,
-        numPhiSlider.value,
+        numTheta,
+        numPhi,
         contextOpacity,
-        showWireframeCheckbox.value,
+        showWireframe,
         showAxes=False,
         showLegend=False,
         backgroundColor="#1d252b",
@@ -553,17 +406,15 @@ def _(mo):
 
 
 @app.cell
-def _(mesh_normals, mesh_vertices, np, pd, spheremesh):
+def _(mesh_normals, mesh_vertices, pd, spheremesh):
     # ---- signed distance and contributions for every surface vertex -------
     _distances = []
     _contributionColumn = []
     for _vertex in mesh_vertices:
         _sphere, _contributions = spheremesh.closestSphere(_vertex)
-        # No contributions means no primitive surface answered: the mesh has
-        # none (sphere is None), or a prysmoid won from behind its midplane and
-        # handed back a radius-0 placeholder whose d = 0 would mean nothing.
+
         _distances.append(
-            _sphere.signedDistance(_vertex) if _contributions else np.nan
+            _sphere.signedDistance(_vertex) if _contributions else print (f"no contributions for vertex {_vertex}")
         )
         _contributionColumn.append(
             [
@@ -602,100 +453,76 @@ def _(mo):
     fall short of it. The two meet at 0 with a hard break, so even a tiny `d`
     shows its sign. The scale is fixed and symmetric about 0. A vertex above
     its top is **dark grey**; one below its bottom stays in the deepest blue.
-    The sphere mesh itself is hidden here. Hover a vertex to read its number,
-    `d` and contributions.
+    The sphere mesh itself is hidden here. Three fixed views, front, 3/4 and
+    back, each triangle in the band of the mean `d` of its corners.
     """)
     return
 
 
 @app.cell
-def _(mo):
-    heatmapSurfaceOpacitySlider = mo.ui.slider(
-        0.0, 1.0, step=0.05, value=1.0, label="surface opacity", show_value=True
-    )
-    return (heatmapSurfaceOpacitySlider,)
-
-
-@app.cell
 def _(
-    DistanceHeatmapSurface,
+    BoundaryNorm,
+    ListedColormap,
+    Poly3DCollection,
     dfVertices,
     fittedMesh,
-    heatmapSurfaceOpacitySlider,
+    heatmapBandColors,
     mesh_triangles,
     mesh_vertices,
-    mo,
-    numPhiSlider,
-    numThetaSlider,
-    renderPrimitives,
-    showWireframeCheckbox,
+    np,
+    plt,
 ):
     # The colour scale spans +-this; a d above it is drawn dark grey.
     heatmapDistanceLimit = 0.02
 
-    _hoverTexts = [
-        f"vertex {vertexIndex}<br>d {distance:.4f}"
-        + "".join(
-            f"<br>{sphereName} {weight:.3f}" for sphereName, weight in contributions
-        )
-        for vertexIndex, distance, contributions in zip(
-            dfVertices.index,
-            dfVertices["d"],
-            dfVertices["contributions"],
-        )
-    ]
-
-    # Only the surface: the sphere mesh is hidden in this view, so nothing but
-    # the distance colours is on screen.
-    heatmapPrimitives = [
-        DistanceHeatmapSurface(
-            mesh_vertices,
-            mesh_triangles,
-            dfVertices["d"].to_numpy(),
-            _hoverTexts,
-            "Signed Distance",
-            heatmapSurfaceOpacitySlider.value,
-            heatmapDistanceLimit,
-        )
-    ]
-    _cutoffCount = int((dfVertices["d"] > heatmapDistanceLimit).sum())
-
-    heatmapFigure = renderPrimitives(
-        heatmapPrimitives,
-        None,
-        numThetaSlider.value,
-        numPhiSlider.value,
-        1.0,
-        showWireframeCheckbox.value,
-        showAxes=False,
-        showLegend=False,
-        backgroundColor="#1d252b",
-        uiRevision=f"heatmap {fittedMesh}",
-        lambertian=True,
+    # The flat 5 mm bands and colours of DistanceHeatmapSurface, in mm. The
+    # bands lie between neighbouring edges, and the last colour is the grey
+    # above the last edge; a d below the first edge stays in the first band.
+    _bandColors = heatmapBandColors(heatmapDistanceLimit)
+    _bandEdges = np.linspace(
+        -1000 * heatmapDistanceLimit, 1000 * heatmapDistanceLimit, len(_bandColors)
     )
+    _colormap = ListedColormap(_bandColors)
+    _norm = BoundaryNorm(_bandEdges, _colormap.N, extend="max")
 
-    # Controls in one row on top, so the render below gets the full width.
-    mo.vstack(
-        [
-            mo.hstack(
-                [
-                    mo.md(f"**Sphere mesh** `{fittedMesh}`"),
-                    heatmapSurfaceOpacitySlider,
-                    mo.md(
-                        f"scale fixed at ±{heatmapDistanceLimit} · "
-                        f"dark grey: {_cutoffCount} of {len(dfVertices)} "
-                        f"vertices with d > {heatmapDistanceLimit}"
-                    ),
-                ],
-                justify="start",
-                align="center",
-                gap=2,
-                wrap=True,
-            ),
-            heatmapFigure,
-        ],
-        gap=1,
+    # Each triangle takes the mean d of its three corners, in mm.
+    _distances = dfVertices["d"].to_numpy(dtype=float)
+    _faceDistances = 1000 * _distances[mesh_triangles].mean(axis=1)
+    plt.style.use('dark_background')
+    heatmapFigure = plt.figure(figsize=(13, 4.6), dpi=200, layout="constrained")
+    # The body's front is -y, which azimuth -90 looks at.
+    for _index, (_view, _azimuth, _elevation) in enumerate(
+        (("front", -90, 0), ("3/4", -45, 20), ("back", 90, 0))
+    ):
+        _axis = heatmapFigure.add_subplot(
+            1, 3, _index + 1, projection="3d", proj_type="ortho"
+        )
+        _surface = Poly3DCollection(
+            mesh_vertices[mesh_triangles],
+            array=_faceDistances,
+            cmap=_colormap,
+            norm=_norm,
+            linewidths=0.3,
+        )
+        _axis.add_collection3d(_surface)
+        _surface.set_edgecolor("face")  # hides the seams between triangles
+        _axis.auto_scale_xyz(*mesh_vertices.T)
+        _axis.set_box_aspect(np.ptp(mesh_vertices, axis=0), zoom=1.3)
+        _axis.view_init(_elevation, _azimuth)
+        _axis.set_axis_off()
+        _axis.set_title(_view)
+        _axis.set_facecolor("dimgray")
+    heatmapFigure.colorbar(
+        _surface, ax=heatmapFigure.axes, ticks=_bandEdges, format="%+.0f",
+        label="d [mm]", shrink=0.8,
     )
+    heatmapFigure.suptitle(
+        f"Sphere mesh {fittedMesh} · scale fixed at ±{1000 * heatmapDistanceLimit:.0f} mm · "
+        f"dark grey: {int((_distances > heatmapDistanceLimit).sum())} of "
+        f"{len(_distances)} vertices with d > {1000 * heatmapDistanceLimit:.0f} mm"
+    )
+    plt.close(heatmapFigure)
+    heatmapFigure
     return (heatmapDistanceLimit,)
 
 
@@ -865,8 +692,8 @@ def _(A, M, b, diags, np, spheremesh, vstack):
 
 
 @app.cell
-def _(A_reg, b_reg, spla):
-    res=spla.lsqr(A_reg.tocsr(), b_reg)
+def _(A_reg, b_reg, np):
+    res=np.linalg.lstsq(A_reg.toarray(), b_reg, rcond=None)
     return (res,)
 
 
@@ -895,225 +722,10 @@ def _(M, res, spheremesh):
 
 
 @app.cell
-def _(fitted_SM_text):
-    print(fitted_SM_text)
-    return
-
-
-@app.cell
 def _(SphereMesh, fitted_SM_text):
     fittedSM=SphereMesh()
     fittedSM.loadFromText(fitted_SM_text)
     return (fittedSM,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## 10 — the fitted sphere mesh inside its surface
-
-    The view of section 5 again, for the sphere mesh rebuilt from the
-    least-squares solution: the same surface drawn over it as a shell of clear
-    plastic, with its own interpolation and closest-sphere controls.
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    fittedShellInterpolationCheckbox = mo.ui.checkbox(
-        value=False, label="Show interpolation"
-    )
-    fittedShellOpacitySlider = mo.ui.slider(
-        0.0, 1.0, step=0.05, value=0.2, label="surface opacity", show_value=True
-    )
-    fittedShellClosestSphereCheckbox = mo.ui.checkbox(
-        value=False, label="Show closest sphere"
-    )
-    # Stand in for fittedShellOpacitySlider and the notebook-wide opacity slider
-    # while a vertex is being queried, as in section 5.
-    fittedShellClosestMeshOpacitySlider = mo.ui.slider(
-        0.0, 1.0, step=0.05, value=0.6,
-        label="sphere mesh opacity", show_value=True,
-    )
-    fittedShellClosestSurfaceOpacitySlider = mo.ui.slider(
-        0.0, 1.0, step=0.05, value=0.3,
-        label="surface opacity", show_value=True,
-    )
-    return (
-        fittedShellClosestMeshOpacitySlider,
-        fittedShellClosestSphereCheckbox,
-        fittedShellClosestSurfaceOpacitySlider,
-        fittedShellInterpolationCheckbox,
-        fittedShellOpacitySlider,
-    )
-
-
-@app.cell
-def _(fittedShellInterpolationCheckbox, mo):
-    # Rebuilt on every toggle, so turning interpolation back on restarts at 1.
-    fittedShellInterpolationCheckbox.value
-
-    fittedShellSpheresPerPrimitiveSlider = mo.ui.slider(
-        0, 20, value=1, label="Spheres per primitive", show_value=True
-    )
-    return (fittedShellSpheresPerPrimitiveSlider,)
-
-
-@app.cell
-def _(fittedShellClosestSphereCheckbox, mesh_vertices, mo):
-    # Rebuilt whenever the checkbox is toggled, so the pick restarts at vertex 0.
-    fittedShellClosestSphereCheckbox.value
-
-    fittedShellVertexIndexSlider = mo.ui.slider(
-        0, len(mesh_vertices) - 1, value=0, label="vertex", show_value=True
-    )
-    return (fittedShellVertexIndexSlider,)
-
-
-@app.cell
-def _(
-    HighlightedSphere,
-    MergedSpheres,
-    ObjSurface,
-    fittedMesh,
-    fittedSM,
-    fittedShellClosestMeshOpacitySlider,
-    fittedShellClosestSphereCheckbox,
-    fittedShellClosestSurfaceOpacitySlider,
-    fittedShellInterpolationCheckbox,
-    fittedShellOpacitySlider,
-    fittedShellSpheresPerPrimitiveSlider,
-    fittedShellVertexIndexSlider,
-    go,
-    mesh_triangles,
-    mesh_vertices,
-    mo,
-    numPhiSlider,
-    numThetaSlider,
-    opacitySlider,
-    renderPrimitives,
-    showSpheresCheckbox,
-    showWireframeCheckbox,
-):
-    # Section 5's render, for fittedSM. Every name here is private (_), since
-    # section 5 already defines the public ones.
-    if fittedShellInterpolationCheckbox.value:
-        _capsuloidSpheres, _prysmoidSpheres = (
-            fittedSM.getInterpolatedSpheresBySource(
-                fittedShellSpheresPerPrimitiveSlider.value
-            )
-        )
-        _sphereCount = len(_capsuloidSpheres) + len(_prysmoidSpheres)
-        _primitives = [
-            MergedSpheres(spheres, name)
-            for spheres, name in (
-                (_capsuloidSpheres, "Capsuloid Interpolation"),
-                (_prysmoidSpheres, "Prysmoid Interpolation"),
-            )
-            if spheres
-        ]
-    else:
-        _sphereCount = 0
-        _primitives = list(fittedSM.capsuloids) + list(fittedSM.prysmoids)
-
-    if showSpheresCheckbox.value or not _primitives:
-        _primitives = list(fittedSM.spheres) + _primitives
-
-    # Everything drawn so far is context for the query below, so it is dimmed
-    # to let the one sphere the query returns stand out opaque on top of it.
-    _contextOpacity = (
-        fittedShellClosestMeshOpacitySlider.value
-        if fittedShellClosestSphereCheckbox.value
-        else opacitySlider.value
-    )
-    _shellOpacity = (
-        fittedShellClosestSurfaceOpacitySlider.value
-        if fittedShellClosestSphereCheckbox.value
-        else fittedShellOpacitySlider.value
-    )
-
-    # Before the shell, so plotly blends the shell over what it encloses.
-    _primitives = _primitives + [
-        ObjSurface(mesh_vertices, mesh_triangles, "Surface Mesh", _shellOpacity)
-    ]
-
-    _contributions = []
-    if fittedShellClosestSphereCheckbox.value:
-        _queriedVertex = mesh_vertices[fittedShellVertexIndexSlider.value]
-        _closestSphere, _contributions = fittedSM.closestSphere(_queriedVertex)
-        if _closestSphere is not None:
-            # Last of all, so nothing translucent is blended over the answer.
-            _primitives = _primitives + [
-                HighlightedSphere(_closestSphere, "Closest Sphere", _contributions)
-            ]
-
-    _figure = renderPrimitives(
-        _primitives,
-        None,
-        numThetaSlider.value,
-        numPhiSlider.value,
-        _contextOpacity,
-        showWireframeCheckbox.value,
-        showAxes=False,
-        showLegend=False,
-        backgroundColor="#1d252b",
-        uiRevision=f"fitted shell {fittedMesh}",
-    )
-
-    if fittedShellClosestSphereCheckbox.value:
-        _figure.add_trace(
-            go.Scatter3d(
-                x=[_queriedVertex[0]],
-                y=[_queriedVertex[1]],
-                z=[_queriedVertex[2]],
-                mode="markers",
-                marker=dict(color="#ff7f0e", size=5),
-                name="Vertex",
-                showlegend=False,
-                hovertemplate=(
-                    f"vertex {fittedShellVertexIndexSlider.value}<br>"
-                    "x %{x:.3f}<br>y %{y:.3f}<br>z %{z:.3f}<extra></extra>"
-                ),
-            )
-        )
-
-    _controlItems = [mo.md(f"**Fitted sphere mesh** `{fittedMesh}`")]
-    # The closest-sphere sliders take this one's job while that mode is on.
-    if not fittedShellClosestSphereCheckbox.value:
-        _controlItems.append(fittedShellOpacitySlider)
-    _controlItems.append(fittedShellInterpolationCheckbox)
-
-    if fittedShellInterpolationCheckbox.value:
-        _controlItems += [
-            fittedShellSpheresPerPrimitiveSlider,
-            mo.md(f"{_sphereCount} interpolated spheres"),
-        ]
-
-    _controlItems.append(fittedShellClosestSphereCheckbox)
-    if fittedShellClosestSphereCheckbox.value:
-        _contributionReport = "".join(
-            f"- `s{sphereIndex}` {contribution:.3f}\n"
-            for sphereIndex, contribution in _contributions
-        )
-        _controlItems += [
-            fittedShellClosestMeshOpacitySlider,
-            fittedShellClosestSurfaceOpacitySlider,
-            fittedShellVertexIndexSlider,
-            mo.md(
-                f"**Closest sphere**\n\n{_contributionReport}"
-                if _contributionReport
-                else "**Closest sphere**\n\nno primitive faces this vertex"
-            ),
-        ]
-
-    mo.hstack(
-        [mo.vstack(_controlItems), _figure],
-        widths=[1, 3],
-        align="start",
-        gap=2,
-    )
-    return
 
 
 @app.cell(hide_code=True)
@@ -1132,7 +744,7 @@ def _(mo):
 @app.cell
 def _(mo):
     fittedSMSphereMeshOpacitySlider = mo.ui.slider(
-        0.0, 1.0, step=0.05, value=0.3, label="sphere mesh opacity", show_value=True
+        0.0, 1.0, step=0.05, value=0.8, label="sphere mesh opacity", show_value=True
     )
     fittedSMSurfaceOpacitySlider = mo.ui.slider(
         0.0, 1.0, step=0.05, value=1.0, label="surface opacity", show_value=True
@@ -1141,25 +753,19 @@ def _(mo):
 
 
 @app.cell
-def _(
-    DistanceHeatmapSurface,
-    fittedMesh,
-    fittedSM,
-    fittedSMSphereMeshOpacitySlider,
-    fittedSMSurfaceOpacitySlider,
-    heatmapDistanceLimit,
-    mesh_triangles,
-    mesh_vertices,
-    mo,
-    np,
-    numPhiSlider,
-    numThetaSlider,
-    renderPrimitives,
-    showSpheresCheckbox,
-    showWireframeCheckbox,
-):
+def _(fittedSM, mesh_vertices, np):
+    # A vertex with a d below this, deeper inside the fitted sphere mesh than
+    # 1 cm, gets a white sphere of this radius centred on it. A sphere rather
+    # than a point marker: a marker sits exactly on the opaque surface, which
+    # clips most of it.
+    insideDistanceThreshold = -0.01
+    insideMarkerRadius = 0.005
+
     # Signed distance of every surface vertex to the fitted sphere mesh, the
-    # same way section 6 measures it against the original one.
+    # same way section 6 measures it against the original one. Apart from the
+    # figure below, so its sliders re-run only the render: in the same cell,
+    # every slider change would measure again, and re-run every cell that
+    # uses these distances.
     _distances = []
     _contributionColumn = []
     for _vertex in mesh_vertices:
@@ -1170,11 +776,7 @@ def _(
         _contributionColumn.append(_contributions)
     fittedSMDistances = np.asarray(_distances)
 
-    fittedSMPrimitives = list(fittedSM.capsuloids) + list(fittedSM.prysmoids)
-    if showSpheresCheckbox.value or not fittedSMPrimitives:
-        fittedSMPrimitives = list(fittedSM.spheres) + fittedSMPrimitives
-
-    _hoverTexts = [
+    fittedSMHoverTexts = [
         f"vertex {vertexIndex}<br>d {distance:.4f}"
         + "".join(
             f"<br>{sphereName} {weight:.3f}" for sphereName, weight in contributions
@@ -1183,6 +785,41 @@ def _(
             zip(fittedSMDistances, _contributionColumn)
         )
     ]
+    return (
+        fittedSMDistances,
+        fittedSMHoverTexts,
+        insideDistanceThreshold,
+        insideMarkerRadius,
+    )
+
+
+@app.cell
+def _(
+    DistanceHeatmapSurface,
+    MergedSpheres,
+    SphereMesh,
+    fittedMesh,
+    fittedSM,
+    fittedSMDistances,
+    fittedSMHoverTexts,
+    fittedSMSphereMeshOpacitySlider,
+    fittedSMSurfaceOpacitySlider,
+    heatmapDistanceLimit,
+    insideDistanceThreshold,
+    insideMarkerRadius,
+    mesh_triangles,
+    mesh_vertices,
+    mo,
+    np,
+    numPhi,
+    numTheta,
+    renderPrimitives,
+    showSpheres,
+    showWireframe,
+):
+    fittedSMPrimitives = list(fittedSM.capsuloids) + list(fittedSM.prysmoids)
+    if showSpheres or not fittedSMPrimitives:
+        fittedSMPrimitives = list(fittedSM.spheres) + fittedSMPrimitives
 
     # Last, so plotly blends the surface over the sphere mesh it encloses.
     fittedSMPrimitives = fittedSMPrimitives + [
@@ -1190,7 +827,7 @@ def _(
             mesh_vertices,
             mesh_triangles,
             fittedSMDistances,
-            _hoverTexts,
+            fittedSMHoverTexts,
             "Signed Distance",
             fittedSMSurfaceOpacitySlider.value,
             heatmapDistanceLimit,
@@ -1198,13 +835,37 @@ def _(
     ]
     _cutoffCount = int((fittedSMDistances > heatmapDistanceLimit).sum())
 
+    # A NaN d (no closest sphere) compares False, so it is never marked.
+    _markedVertexIndices = np.flatnonzero(fittedSMDistances < insideDistanceThreshold)
+    if len(_markedVertexIndices) > 0:
+        _markerSpheres = MergedSpheres(
+            [
+                SphereMesh.Sphere(
+                    vertexIndex, mesh_vertices[vertexIndex], insideMarkerRadius
+                )
+                for vertexIndex in _markedVertexIndices
+            ],
+            "Marked Vertex",
+        )
+        # Opaque, unlit white. The notebook's light is fixed in the scene, so a
+        # lit white sphere turns grey when seen from the side it does not reach.
+        _markerSpheres.drawWireframe = False
+        _markerSpheres.traceOverrides = dict(
+            color="#ffffff",
+            opacity=1.0,
+            lighting=dict(
+                ambient=1.0, diffuse=0.0, specular=0.0, roughness=1.0, fresnel=0.0
+            ),
+        )
+        fittedSMPrimitives = fittedSMPrimitives + [_markerSpheres]
+
     fittedSMFigure = renderPrimitives(
         fittedSMPrimitives,
         None,
-        numThetaSlider.value,
-        numPhiSlider.value,
+        numTheta,
+        numPhi,
         fittedSMSphereMeshOpacitySlider.value,
-        showWireframeCheckbox.value,
+        showWireframe,
         showAxes=False,
         showLegend=False,
         backgroundColor="#1d252b",
@@ -1225,7 +886,9 @@ def _(
                     mo.md(
                         f"scale fixed at ±{heatmapDistanceLimit} · "
                         f"dark grey: {_cutoffCount} of {len(fittedSMDistances)} "
-                        f"vertices with d > {heatmapDistanceLimit}"
+                        f"vertices with d > {heatmapDistanceLimit} · "
+                        f"white: {len(_markedVertexIndices)} vertices "
+                        f"with d < {insideDistanceThreshold}"
                     ),
                 ],
                 justify="start",
@@ -1237,285 +900,400 @@ def _(
         ],
         gap=1,
     )
-    return (fittedSMDistances,)
-
-
-@app.cell
-def _(A_reg, M, go, np, plt):
-    #render the linear system matrix
-    # Every entry of A is a weight in [0, 1] times a component of a unit normal,
-    # so the scale is fixed at [-1, 1], symmetric about 0: the zero entries -
-    # most of the matrix, since a vertex involves at most three spheres - all
-    # land on coolwarm's neutral grey, with blue below and red above.
-    _coolwarm = plt.colormaps["coolwarm"]
-    linearSystemColorscale = [
-        [
-            float(position),
-            "rgb({}, {}, {})".format(
-                *(round(255 * channel) for channel in _coolwarm(position)[:3])
-            ),
-        ]
-        for position in np.linspace(0.0, 1.0, 21)
-    ]
-
-    # One label per column of A, in the order of the unknown vector x.
-    unknownLabels = [
-        f"s{sphereIndex} {unknown}"
-        for sphereIndex in range(M)
-        for unknown in ("cx", "cy", "cz", "r")
-    ]
-
-    linearSystemFigure = go.Figure(
-        go.Heatmap(
-            # float32 halves what marimo ships to the browser.
-            z=A_reg.toarray().astype(np.float32),
-            x=unknownLabels,
-            colorscale=linearSystemColorscale,
-            zmin=-1.0,
-            zmax=1.0,
-            colorbar=dict(tickformat=".2f", dtick=0.25, thickness=14),
-            hovertemplate="vertex %{y}<br>%{x}<br>%{z:.3f}<extra></extra>",
-        )
-    )
-    linearSystemFigure.update_layout(
-        title=f"A  ({A_reg.shape[0]} × {A_reg.shape[1]})",
-        height=800,
-        margin=dict(l=60, r=20, t=50, b=60),
-        xaxis=dict(title="unknown", tickangle=-90),
-        # Row 0 on top, the way a matrix is written.
-        yaxis=dict(title="vertex", autorange="reversed"),
-        # Keeps a zoom in place when an upstream cell re-runs.
-        uirevision="linear system matrix",
-    )
-    linearSystemFigure
     return
 
 
 @app.cell
-def _(A_reg, M, np):
-    #print number of columns with no contributions
-    # The last 4M rows of A_reg are the regularization diagonal, which puts a
-    # 0.05 in every column, so only the vertex rows above it are checked.
-    _vertexRows = A_reg[: A_reg.shape[0] - 4 * M]
-    _nonZeroCounts = np.asarray((_vertexRows != 0).sum(axis=0)).ravel()
-    _emptyColumns = np.flatnonzero(_nonZeroCounts == 0)
-    _unknownNames = ("cx", "cy", "cz", "r")
+def _(dfVertices, fittedSMDistances, go, mo, np, pd):
+    #some stats of fittedSMDistances vs the original SMPL distances
 
-    print(f"{len(_emptyColumns)} of {_vertexRows.shape[1]} columns of A are all zero:")
-    for _column in _emptyColumns:
-        print(f"  column {_column}: s{_column // 4} {_unknownNames[_column % 4]}")
+    # Signed distance of every surface vertex, in mm: to the original sphere
+    # mesh (section 6) and to the fitted one (section 11).
+    _distancesByName = {
+        "before the fit": 1000 * dfVertices["d"].to_numpy(dtype=float),
+        "after the fit": 1000 * fittedSMDistances,
+    }
+    # Line colour and its 10% wash, categorical slots 1 and 2.
+    _colorsByName = {
+        "before the fit": ("#2a78d6", "rgba(42, 120, 214, 0.1)"),
+        "after the fit": ("#eb6834", "rgba(235, 104, 52, 0.1)"),
+    }
 
-    # The all-zero columns are listed above, so the emptiest ones worth naming
-    # are the emptiest columns that still have a vertex in them. A sphere's
-    # four columns usually tie, so every column at the minimum is listed.
-    _nonEmptyCounts = _nonZeroCounts[_nonZeroCounts > 0]
-    if len(_nonEmptyCounts) > 0:
-        _minimumCount = _nonEmptyCounts.min()
-        _emptiestColumns = np.flatnonzero(_nonZeroCounts == _minimumCount)
-        print(
-            f"the emptiest non-empty columns have {_minimumCount} non-zero values "
-            f"({len(_emptiestColumns)} columns):"
+    # The same bins for both, so their counts compare bin for bin.
+    _allDistances = np.concatenate(list(_distancesByName.values()))
+    _binEdges = np.linspace(np.nanmin(_allDistances), np.nanmax(_allDistances), 51)
+
+    histogramFigure = go.Figure()
+    for _name, _distances in _distancesByName.items():
+        _counts, _ = np.histogram(_distances[~np.isnan(_distances)], bins=_binEdges)
+        # An outline histogram: a step per bin, from 0 up at the first edge and
+        # back down to 0 at the last.
+        histogramFigure.add_trace(
+            go.Scatter(
+                x=np.concatenate([[_binEdges[0]], _binEdges]),
+                y=np.concatenate([[0], _counts, [0]]),
+                name=_name,
+                mode="lines",
+                line=dict(color=_colorsByName[_name][0], width=2, shape="hv"),
+                fill="tozeroy",
+                fillcolor=_colorsByName[_name][1],
+                hovertemplate=(
+                    f"{_name}<br>from %{{x:.1f}} mm: %{{y}} vertices<extra></extra>"
+                ),
+            )
         )
-        for _column in _emptiestColumns:
-            print(f"  column {_column}: s{_column // 4} {_unknownNames[_column % 4]}")
-    return
 
-
-@app.cell
-def _(fittedSMDistances, go, np):
-    #some stats of fittedSMDistances
-
-    print(f"fittedSMDistances: min {np.nanmin(fittedSMDistances):.4f}, max {np.nanmax(fittedSMDistances):.4f}, mean {np.nanmean(fittedSMDistances):.4f}, std {np.nanstd(fittedSMDistances):.4f}")
-    #hystogram of fittedSMDistances
-    histogramFigure = go.Figure(
-        go.Histogram(
-            x=fittedSMDistances,
-            nbinsx=50,
-            marker_color="#1f77b4",
-            opacity=0.75,
-        )
-    )
-    sum_of_distances = np.nansum(fittedSMDistances)
-    print(f"Sum of fittedSMDistances: {sum_of_distances:.4f}")
-
+    # 0 is the sign break: negative is inside the sphere mesh.
+    histogramFigure.add_vline(x=0, line_width=1, line_color="#c3c2b7")
     histogramFigure.update_layout(
-        title="Histogram of fittedSMDistances",
-        xaxis_title="Signed Distance",
-        yaxis_title="Count",
-        bargap=0.1,
+        title=dict(
+            text="Signed distance of the surface vertices, before and after the fit",
+            font=dict(color="#0b0b0b", size=15),
+        ),
+        xaxis_title="signed distance [mm], negative inside the sphere mesh",
+        yaxis_title="vertices",
         height=400,
-        margin=dict(l=60, r=20, t=50, b=60),
+        margin=dict(l=60, r=20, t=80, b=60),
+        paper_bgcolor="#fcfcfb",
+        plot_bgcolor="#fcfcfb",
+        font=dict(color="#52514e"),
+        legend=dict(orientation="h", x=0, y=1.1, font=dict(color="#0b0b0b")),
     )
+    histogramFigure.update_xaxes(gridcolor="#e1e0d9", linecolor="#c3c2b7", zeroline=False)
+    histogramFigure.update_yaxes(gridcolor="#e1e0d9", linecolor="#c3c2b7", zeroline=False)
+
+    _statistics = pd.DataFrame(
+        {
+            _name: {
+                "min": np.nanmin(_distances),
+                "max": np.nanmax(_distances),
+                "mean": np.nanmean(_distances),
+                "std": np.nanstd(_distances),
+                "sum": np.nansum(_distances),
+            }
+            for _name, _distances in _distancesByName.items()
+        }
+    ).round(2)
+    mo.vstack([histogramFigure, mo.md("**Signed distance, in mm**"), _statistics])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 12 — the ernias problem
+
+    il fitting produce alcune "ernie" ossia alcune sfere escono in maniera spropositata in alcuni punti del corpo. il prossimo passo del fitting è quello di inserire vincoli aggiuntivi ai vertici che sono dentro l'ernia ovvero che hanno signed distance $d < -\varepsilon$, con $\varepsilon = 1$ cm: sono i vertici bianchi della sezione 11, dentro la sphere mesh, dove le sfere escono dalla pelle.
+
+    Ogni vertice in ernia aggiunge in fondo al sistema regolarizzato una riga di tangenza come quelle della sezione 8, scritta però con le contributions della sphere mesh **fittata**, cioè del primitivo che ora lo ingloba:
+
+    $$
+    \lambda\sum_{j} w_{ij}\left(\mathbf c_j\cdot\hat{\mathbf n}_i+r_j\right)=\lambda\,\mathbf p_i\cdot\hat{\mathbf n}_i
+    $$
+
+    con $\lambda$ = `herniaWeight`. Si risolve di nuovo, si rimisura $d$ e si ripete finché non resta nessuna ernia, o per al massimo `maxHerniaIterations` volte. Le righe si **accumulano**: un vertice che resta in ernia riceve un'altra riga, e il suo peso cresce. Tenere solo le righe dell'ultima iterazione fa oscillare il ciclo, perché le ernie già sistemate perdono la loro riga e tornano.
+    """)
     return
 
 
 @app.cell
 def _(
-    ObjSurface,
-    dfVertices,
-    fittedMesh,
-    go,
+    A_reg,
+    M,
+    SphereMesh,
+    b_reg,
+    fittedSM,
+    lil_matrix,
     mesh_normals,
+    mesh_vertices,
+    np,
+    spheremesh,
+    vstack,
+):
+    #copiando lo stile di codice del primo fitting, svolgiamo questi passaggi:
+    #1 misura d di ogni vertice rispetto alla sphere mesh corrente (la prima volta la fitted
+    #  sphere mesh della sezione 9) e filtra i vertici con d < -0.01 (cioè quelli che sono
+    #  all'interno della mesh sferica, dove le sfere escono dalla pelle)
+    #2 trova sphere e contributions per ogni vertice filtrato rispetto alla sphere mesh corrente,
+    #  non all'originale: il primitivo che ora ingloba il vertice può non essere quello della
+    #  sua riga della sezione 8
+    #3 come prima ogni nuovo vincolo è una riga come quelle della matrice A:
+    #  la sommatoria su j di w_j * (c_j · n + r_j) = p · n, dove il peso w_j moltiplica anche
+    #  il raggio. riga e termine noto sono moltiplicati entrambi per herniaWeight
+    #4 questo aggiunge Y righe in fondo ad A_reg e Y valori in fondo a b_reg (non ad A e b:
+    #  senza le righe della regolarizzazione le sfere non sono più tenute vicine all'originale),
+    #  dove Y è il numero di vertici filtrati
+    #5 il sistema è risolto con np.linalg.lstsq, la sphere mesh è ricostruita dalla soluzione e
+    #  si riparte dal punto 1, finché non resta nessun vertice con d < -0.01 o al massimo
+    #  maxHerniaIterations volte
+    #6 le righe delle iterazioni precedenti restano nel sistema: se si tengono solo quelle
+    #  dell'ultima, le ernie già sistemate perdono la loro riga, tornano, e il ciclo oscilla
+    #il salvataggio nello stesso formato del file della mesh sferica originale è nella cella sotto
+
+    # A vertex deeper than this inside the sphere mesh, in m, is a hernia: the
+    # white markers of section 11.
+    herniaThreshold = -0.01
+    # Multiplies every hernia row and its b entry; a tangency row of A has 1.
+    herniaWeight = 1.0
+    maxHerniaIterations = 10
+
+    # Prysmoids first, then capsuloids, as the text format lists them, so every
+    # solution is rebuilt into a sphere mesh with the same topology.
+    sphereMeshConnections = [
+        (prysmoid.sA.index, prysmoid.sB.index, prysmoid.sC.index)
+        for prysmoid in spheremesh.prysmoids
+    ] + [
+        (capsuloid.sA.index, capsuloid.sB.index)
+        for capsuloid in spheremesh.capsuloids
+    ]
+
+    herniaSM = fittedSM
+    _herniaRowBlocks = []
+    _herniaRightHandSides = []
+    # One entry per solve; iteration 0 is the fit of section 9.
+    herniaHistory = []
+    for _iteration in range(maxHerniaIterations + 1):
+        # The d of section 11 for every vertex at once: signedDistances() takes
+        # the same minimum over the primitives that closestSphere() does.
+        _distances = herniaSM.signedDistances(mesh_vertices)
+        _herniaVertexIndices = np.flatnonzero(_distances < herniaThreshold)
+        herniaHistory.append(
+            {
+                "iteration": _iteration,
+                "hernia rows in the solve": sum(
+                    len(_rightHandSide) for _rightHandSide in _herniaRightHandSides
+                ),
+                "hernias": len(_herniaVertexIndices),
+                "min d [mm]": 1000 * _distances.min(),
+            }
+        )
+        if len(_herniaVertexIndices) == 0 or _iteration == maxHerniaIterations:
+            break
+
+        _herniaRows = lil_matrix((len(_herniaVertexIndices), 4 * M))
+        _herniaRightHandSide = np.zeros(len(_herniaVertexIndices))
+        for _rowIndex, _vertexIndex in enumerate(_herniaVertexIndices):
+            _vertexPosition = mesh_vertices[_vertexIndex]
+            _vertexNormal = mesh_normals[_vertexIndex]
+            _herniaRightHandSide[_rowIndex] = herniaWeight * np.dot(
+                _vertexPosition, _vertexNormal
+            )
+
+            _, _contributions = herniaSM.closestSphere(_vertexPosition)
+            for _sphereIndex, _weight in _contributions:
+                _rowWeight = herniaWeight * _weight
+                _herniaRows[_rowIndex, 4 * _sphereIndex + 0] = _rowWeight * _vertexNormal[0]
+                _herniaRows[_rowIndex, 4 * _sphereIndex + 1] = _rowWeight * _vertexNormal[1]
+                _herniaRows[_rowIndex, 4 * _sphereIndex + 2] = _rowWeight * _vertexNormal[2]
+                _herniaRows[_rowIndex, 4 * _sphereIndex + 3] = _rowWeight
+        _herniaRowBlocks.append(_herniaRows.tocsr())
+        _herniaRightHandSides.append(_herniaRightHandSide)
+
+        _herniaA = vstack([A_reg] + _herniaRowBlocks).tocsr()
+        _herniaB = np.concatenate([b_reg] + _herniaRightHandSides)
+        _herniaSolution = np.linalg.lstsq(_herniaA.toarray(), _herniaB, rcond=None)[0]
+
+        _sphereBlocks = _herniaSolution.reshape(M, 4)
+        herniaSM = SphereMesh.fromSpheresAndConnections(
+            _sphereBlocks[:, :3], _sphereBlocks[:, 3], sphereMeshConnections
+        )
+    return herniaHistory, herniaSM, herniaThreshold, sphereMeshConnections
+
+
+@app.cell
+def _(
+    Path,
+    SphereMesh,
+    fittedMesh,
+    herniaHistory,
+    herniaSM,
+    herniaThreshold,
+    meshRotation,
+    mo,
+    pd,
+    sphereMeshConnections,
+    sphereMeshPath,
+):
+    # Next to the sphere mesh the fit started from, under a new name.
+    herniaSavePath = Path(sphereMeshPath).with_name(f"fitted_{fittedMesh}_hernias.txt")
+
+    # The text files hold a sphere mesh in its own frame, before section 4's
+    # rotation, so the fit is turned back first: the inverse of a rotation is
+    # its transpose. A copy, so herniaSM itself stays in the notebook's frame.
+    _savedSM = SphereMesh.fromSpheresAndConnections(
+        [sphere.center for sphere in herniaSM.spheres],
+        [sphere.radius for sphere in herniaSM.spheres],
+        sphereMeshConnections,
+    )
+    _savedSM.rotate(meshRotation.T)
+    _savedSM.saveToFile(str(herniaSavePath))
+
+    _herniasLeft = herniaHistory[-1]["hernias"]
+    _outcome = (
+        f"no vertex left with d < {herniaThreshold}"
+        if _herniasLeft == 0
+        else f"stopped with {_herniasLeft} vertices still at d < {herniaThreshold}"
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"**Hernia loop**: {len(herniaHistory) - 1} solves, {_outcome}. "
+                f"Saved to `{herniaSavePath}`."
+            ),
+            pd.DataFrame(herniaHistory).round(1),
+        ]
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    # This figure's own sliders. Sharing section 11's made every change re-run
+    # both figures, and every cell downstream of section 11's.
+    herniaSMSphereMeshOpacitySlider = mo.ui.slider(
+        0.0, 1.0, step=0.05, value=0.8, label="sphere mesh opacity", show_value=True
+    )
+    herniaSMSurfaceOpacitySlider = mo.ui.slider(
+        0.0, 1.0, step=0.05, value=1.0, label="surface opacity", show_value=True
+    )
+    return herniaSMSphereMeshOpacitySlider, herniaSMSurfaceOpacitySlider
+
+
+@app.cell
+def _(herniaSM, mesh_vertices, np):
+    # Signed distance of every surface vertex to the sphere mesh after the
+    # hernia loop, the same way section 6 measures it against the original one.
+    # Apart from the figure below, like section 11's, so its sliders re-run
+    # only the render.
+    _distances = []
+    _contributionColumn = []
+    for _vertex in mesh_vertices:
+        _sphere, _contributions = herniaSM.closestSphere(_vertex)
+        _distances.append(
+            _sphere.signedDistance(_vertex) if _contributions else np.nan
+        )
+        _contributionColumn.append(_contributions)
+    final_fittedSMDistances = np.asarray(_distances)
+
+    final_fittedSMHoverTexts = [
+        f"vertex {vertexIndex}<br>d {distance:.4f}"
+        + "".join(
+            f"<br>{sphereName} {weight:.3f}" for sphereName, weight in contributions
+        )
+        for vertexIndex, (distance, contributions) in enumerate(
+            zip(final_fittedSMDistances, _contributionColumn)
+        )
+    ]
+    return final_fittedSMDistances, final_fittedSMHoverTexts
+
+
+@app.cell
+def _(
+    DistanceHeatmapSurface,
+    MergedSpheres,
+    SphereMesh,
+    final_fittedSMDistances,
+    final_fittedSMHoverTexts,
+    fittedMesh,
+    heatmapDistanceLimit,
+    herniaSM,
+    herniaSMSphereMeshOpacitySlider,
+    herniaSMSurfaceOpacitySlider,
+    insideDistanceThreshold,
+    insideMarkerRadius,
     mesh_triangles,
     mesh_vertices,
     mo,
     np,
-    numPhiSlider,
-    numThetaSlider,
+    numPhi,
+    numTheta,
     renderPrimitives,
-    showWireframeCheckbox,
-    spheremesh,
+    showSpheres,
+    showWireframe,
 ):
-    #solving butt problem
+    # Section 11's heatmap, drawn for herniaSM, the sphere mesh the hernia loop
+    # ends with, with the same scale and white markers.
 
-    #show only vertecies in which the original closest sphere - vertex position direction disagree with the vertex normal
+    final_fittedSMPrimitives = list(herniaSM.capsuloids) + list(herniaSM.prysmoids)
+    if showSpheres or not final_fittedSMPrimitives:
+        final_fittedSMPrimitives = list(herniaSM.spheres) + final_fittedSMPrimitives
 
-    # A vertex is shown when n . (p - c) / |p - c| falls below this, with c the
-    # centre of its closest sphere in the original mesh. 1 means the normal
-    # points straight away from that sphere, as the tangency equation of
-    # section 8 assumes; 0.5 is 60 degrees off.
-    alignmentThreshold = 0.5
-
-    # The closest sphere's centre is its contributions' blend of the constituent
-    # centres - exactly, for a capsuloid's lerp and for a prysmoid's barycentric
-    # point on the midplane - so section 6's table already holds it.
-    constituentCentres = np.array([sphere.center for sphere in spheremesh.spheres])
-    _contributionsPerVertex = list(dfVertices["contributions"])
-    _closestCentres = np.array([
-        sum(weight * constituentCentres[sphereIndex] for sphereIndex, weight in contributions)
-        if contributions else np.full(3, np.nan)
-        for contributions in _contributionsPerVertex
-    ])
-    _offsets = mesh_vertices - _closestCentres
-    vertexAlignment = (
-        np.einsum("ij,ij->i", mesh_normals, _offsets)
-        / np.linalg.norm(_offsets, axis=1)
-    )
-    # A vertex without contributions has a NaN alignment, which this skips.
-    misalignedVertexIndices = np.flatnonzero(vertexAlignment < alignmentThreshold)
-
-    # How much of the solve those vertices hand each constituent sphere.
-    _weightBySphere = {}
-    for _vertexIndex in misalignedVertexIndices:
-        for _sphereIndex, _weight in _contributionsPerVertex[_vertexIndex]:
-            _weightBySphere[_sphereIndex] = _weightBySphere.get(_sphereIndex, 0.0) + _weight
-    _involvedSphereIndices = sorted(
-        (sphereIndex for sphereIndex, weight in _weightBySphere.items() if weight > 0.01),
-        key=lambda sphereIndex: -_weightBySphere[sphereIndex],
-    )
-
-    # Only the spheres those vertices pull on, translucent, inside a faint
-    # shell cut down to the box around them (plus 5 cm), so the view opens on
-    # them rather than on the whole body.
-    if _involvedSphereIndices:
-        _involvedRadii = np.array(
-            [spheremesh.spheres[sphereIndex].radius for sphereIndex in _involvedSphereIndices]
+    # Last, so plotly blends the surface over the sphere mesh it encloses.
+    final_fittedSMPrimitives = final_fittedSMPrimitives + [
+        DistanceHeatmapSurface(
+            mesh_vertices,
+            mesh_triangles,
+            final_fittedSMDistances,
+            final_fittedSMHoverTexts,
+            "Signed Distance",
+            herniaSMSurfaceOpacitySlider.value,
+            heatmapDistanceLimit,
         )
-        _involvedCentres = constituentCentres[_involvedSphereIndices]
-        _boxMin = (_involvedCentres - _involvedRadii[:, None]).min(axis=0) - 0.05
-        _boxMax = (_involvedCentres + _involvedRadii[:, None]).max(axis=0) + 0.05
-        _vertexInBox = np.all((mesh_vertices >= _boxMin) & (mesh_vertices <= _boxMax), axis=1)
-        _keptTriangles = mesh_triangles[_vertexInBox[mesh_triangles].all(axis=1)]
-        # Re-indexed onto the vertices they use: plotly sizes the scene to every
-        # vertex it is given, referenced or not.
-        _shellVertexIndices, _shellCorners = np.unique(_keptTriangles.ravel(), return_inverse=True)
-        _shellVertices = mesh_vertices[_shellVertexIndices]
-        _shellTriangles = _shellCorners.reshape(-1, 3)
-    else:
-        _shellVertices, _shellTriangles = mesh_vertices, mesh_triangles
-    _primitives = [spheremesh.spheres[sphereIndex] for sphereIndex in _involvedSphereIndices]
-    _primitives.append(ObjSurface(_shellVertices, _shellTriangles, "Surface Mesh", 0.15))
-    misalignmentFigure = renderPrimitives(
-        _primitives,
+    ]
+    _cutoffCount = int((final_fittedSMDistances > heatmapDistanceLimit).sum())
+
+    # A NaN d (no closest sphere) compares False, so it is never marked.
+    _markedVertexIndices = np.flatnonzero(final_fittedSMDistances < insideDistanceThreshold)
+    if len(_markedVertexIndices) > 0:
+        _markerSpheres = MergedSpheres(
+            [
+                SphereMesh.Sphere(
+                    vertexIndex, mesh_vertices[vertexIndex], insideMarkerRadius
+                )
+                for vertexIndex in _markedVertexIndices
+            ],
+            "Marked Vertex",
+        )
+        # Opaque, unlit white. The notebook's light is fixed in the scene, so a
+        # lit white sphere turns grey when seen from the side it does not reach.
+        _markerSpheres.drawWireframe = False
+        _markerSpheres.traceOverrides = dict(
+            color="#ffffff",
+            opacity=1.0,
+            lighting=dict(
+                ambient=1.0, diffuse=0.0, specular=0.0, roughness=1.0, fresnel=0.0
+            ),
+        )
+        final_fittedSMPrimitives = final_fittedSMPrimitives + [_markerSpheres]
+
+    final_fittedSMFigure = renderPrimitives(
+        final_fittedSMPrimitives,
         None,
-        numThetaSlider.value,
-        numPhiSlider.value,
-        0.15,
-        showWireframeCheckbox.value,
+        numTheta,
+        numPhi,
+        herniaSMSphereMeshOpacitySlider.value,
+        showWireframe,
         showAxes=False,
-        showLegend=True,
+        showLegend=False,
         backgroundColor="#1d252b",
-        uiRevision=f"misaligned {fittedMesh}",
+        uiRevision=f"hernias {fittedMesh}",
+        # No primitiveColor: the sphere mesh keeps its per-type colours, red
+        # spheres, blue capsuloids and purple prysmoids.
         lambertian=True,
     )
-    # Front (-y) and a little below, closer than the notebook's usual eye:
-    # these vertices sit between the legs, with their normals facing down.
-    misalignmentFigure.update_layout(scene_camera=dict(eye=dict(x=0.45, y=-1.25, z=-0.2)))
 
-    def _segments(starts, ends):
-        """NaN-separated start-end pairs, one polyline per segment for Scatter3d."""
-        points = np.full((3 * len(starts), 3), np.nan)
-        points[0::3] = starts
-        points[1::3] = ends
-        return points
-
-    _positions = mesh_vertices[misalignedVertexIndices]
-    _normals = mesh_normals[misalignedVertexIndices]
-    _centres = _closestCentres[misalignedVertexIndices]
-    _alignments = vertexAlignment[misalignedVertexIndices]
-
-    # What the tangency equation assumes the normal to be, next to what it is.
-    _centreSegments = _segments(_centres, _positions)
-    misalignmentFigure.add_trace(go.Scatter3d(
-        x=_centreSegments[:, 0], y=_centreSegments[:, 1], z=_centreSegments[:, 2],
-        mode="lines", line=dict(color="#c3c2b7", width=2),
-        name="closest-sphere centre → vertex", hoverinfo="skip",
-    ))
-    _normalSegments = _segments(_positions, _positions + 0.05 * _normals)
-    misalignmentFigure.add_trace(go.Scatter3d(
-        x=_normalSegments[:, 0], y=_normalSegments[:, 1], z=_normalSegments[:, 2],
-        mode="lines", line=dict(color="#ff7f0e", width=4),
-        name="vertex normal (5 cm)", hoverinfo="skip",
-    ))
-
-    # One blue, light to dark: the lightest, most visible on the dark
-    # background, are the vertices that disagree the most.
-    misalignmentFigure.add_trace(go.Scatter3d(
-        x=_positions[:, 0], y=_positions[:, 1], z=_positions[:, 2],
-        mode="markers",
-        marker=dict(
-            size=8,
-            color=_alignments,
-            colorscale=[[0.0, "#cde2fb"], [1.0, "#2a78d6"]],
-            cmin=-1.0,
-            cmax=alignmentThreshold,
-            colorbar=dict(title="n·(p−c)/|p−c|", thickness=12, len=0.6),
-        ),
-        name="misaligned vertex",
-        text=[
-            f"vertex {vertexIndex}<br>n·(p−c)/|p−c| {alignment:+.2f}"
-            + "".join(
-                f"<br>s{sphereIndex} {weight:.3f}"
-                for sphereIndex, weight in _contributionsPerVertex[vertexIndex]
-            )
-            for vertexIndex, alignment in zip(misalignedVertexIndices, _alignments)
-        ],
-        hovertemplate="%{text}<extra></extra>",
-    ))
-
-    # Each involved sphere named at its centre.
-    _labelCentres = constituentCentres[_involvedSphereIndices]
-    misalignmentFigure.add_trace(go.Scatter3d(
-        x=_labelCentres[:, 0], y=_labelCentres[:, 1], z=_labelCentres[:, 2],
-        mode="text",
-        text=[f"s{sphereIndex}" for sphereIndex in _involvedSphereIndices],
-        textfont=dict(color="#fbfcfc", size=13),
-        showlegend=False,
-        hoverinfo="skip",
-    ))
-
+    # Controls in one row on top, so the render below gets the full width.
     mo.vstack(
         [
-            mo.md(
-                f"**{len(misalignedVertexIndices)}** of {len(mesh_vertices)} vertices "
-                f"have n·(p−c)/|p−c| < {alignmentThreshold} against their closest "
-                f"sphere in the original mesh. The weight they hand the solve: "
-                + ", ".join(
-                    f"`s{sphereIndex}` {_weightBySphere[sphereIndex]:.1f}"
-                    for sphereIndex in _involvedSphereIndices
-                )
+            mo.hstack(
+                [
+                    mo.md(f"**After the hernia loop** `{fittedMesh}`"),
+                    herniaSMSphereMeshOpacitySlider,
+                    herniaSMSurfaceOpacitySlider,
+                    mo.md(
+                        f"scale fixed at ±{heatmapDistanceLimit} · "
+                        f"dark grey: {_cutoffCount} of {len(final_fittedSMDistances)} "
+                        f"vertices with d > {heatmapDistanceLimit} · "
+                        f"white: {len(_markedVertexIndices)} vertices "
+                        f"with d < {insideDistanceThreshold}"
+                    ),
+                ],
+                justify="start",
+                align="center",
+                gap=2,
+                wrap=True,
             ),
-            misalignmentFigure,
+            final_fittedSMFigure,
         ],
         gap=1,
     )
@@ -1523,19 +1301,101 @@ def _(
 
 
 @app.cell
-def _(SphereMesh, fittedMesh, fitted_SM_text, meshRotation):
-    #save the fitted sphere mesh to a file
-    #rotate back to the original orientation, so it can be loaded into marimo
-    # This is necessary because the fitting process is done in a different coordinate system.
-    # A rotation's inverse is its transpose. It is applied to a copy rebuilt
-    # from fitted_SM_text, never to fittedSM: marimo may run sections 10 and 11
-    # after this cell, and they must draw fittedSM in the plot's orientation.
-    # Saved into examples/, where sphereMeshPathsByMeshName reads it, so the
-    # next run starts from this fit.
-    _savedSM = SphereMesh()
-    _savedSM.loadFromText(fitted_SM_text)
-    _savedSM.rotate(meshRotation.T)
-    _savedSM.saveToFile(f"examples/fitted_{fittedMesh}.txt")
+def _(
+    dfVertices,
+    final_fittedSMDistances,
+    fittedSMDistances,
+    go,
+    herniaHistory,
+    mo,
+    np,
+    pd,
+):
+    # The histogram of section 11 with herniaSM added as a third series.
+
+    # The solves the hernia loop took to reach herniaSM; iteration 0 is section 9's fit.
+    _herniaIterationCount = herniaHistory[-1]["iteration"]
+    _herniaSeriesName = (
+        f"after {_herniaIterationCount} hernia "
+        f"{'iteration' if _herniaIterationCount == 1 else 'iterations'}"
+    )
+
+    # Signed distance of every surface vertex, in mm: to the original sphere
+    # mesh (section 6), to the fitted one (section 11) and to herniaSM
+    # (section 12).
+    _distancesByName = {
+        "before the fit": 1000 * dfVertices["d"].to_numpy(dtype=float),
+        "after the fit": 1000 * fittedSMDistances,
+        _herniaSeriesName: 1000 * final_fittedSMDistances,
+    }
+    # Line colour and its 10% wash, categorical slots 1, 2 and 3.
+    _colorsByName = {
+        "before the fit": ("#2a78d6", "rgba(42, 120, 214, 0.1)"),
+        "after the fit": ("#eb6834", "rgba(235, 104, 52, 0.1)"),
+        _herniaSeriesName: ("#1baf7a", "rgba(27, 175, 122, 0.1)"),
+    }
+
+    # The same bins for all three, so their counts compare bin for bin.
+    _allDistances = np.concatenate(list(_distancesByName.values()))
+    _binEdges = np.linspace(np.nanmin(_allDistances), np.nanmax(_allDistances), 51)
+
+    # Underscored: section 11's cell already defines histogramFigure, and marimo
+    # refuses a name defined in two cells.
+    _histogramFigure = go.Figure()
+    for _name, _distances in _distancesByName.items():
+        _counts, _ = np.histogram(_distances[~np.isnan(_distances)], bins=_binEdges)
+        # An outline histogram: a step per bin, from 0 up at the first edge and
+        # back down to 0 at the last.
+        _histogramFigure.add_trace(
+            go.Scatter(
+                x=np.concatenate([[_binEdges[0]], _binEdges]),
+                y=np.concatenate([[0], _counts, [0]]),
+                name=_name,
+                mode="lines",
+                line=dict(color=_colorsByName[_name][0], width=2, shape="hv"),
+                fill="tozeroy",
+                fillcolor=_colorsByName[_name][1],
+                hovertemplate=(
+                    f"{_name}<br>from %{{x:.1f}} mm: %{{y}} vertices<extra></extra>"
+                ),
+            )
+        )
+
+    # 0 is the sign break: negative is inside the sphere mesh.
+    _histogramFigure.add_vline(x=0, line_width=1, line_color="#c3c2b7")
+    _histogramFigure.update_layout(
+        title=dict(
+            text=(
+                "Signed distance of the surface vertices, before and after the "
+                "fit, and after the hernia loop"
+            ),
+            font=dict(color="#0b0b0b", size=15),
+        ),
+        xaxis_title="signed distance [mm], negative inside the sphere mesh",
+        yaxis_title="vertices",
+        height=400,
+        margin=dict(l=60, r=20, t=80, b=60),
+        paper_bgcolor="#fcfcfb",
+        plot_bgcolor="#fcfcfb",
+        font=dict(color="#52514e"),
+        legend=dict(orientation="h", x=0, y=1.1, font=dict(color="#0b0b0b")),
+    )
+    _histogramFigure.update_xaxes(gridcolor="#e1e0d9", linecolor="#c3c2b7", zeroline=False)
+    _histogramFigure.update_yaxes(gridcolor="#e1e0d9", linecolor="#c3c2b7", zeroline=False)
+
+    _statistics = pd.DataFrame(
+        {
+            _name: {
+                "min": np.nanmin(_distances),
+                "max": np.nanmax(_distances),
+                "mean": np.nanmean(_distances),
+                "std": np.nanstd(_distances),
+                "sum": np.nansum(_distances),
+            }
+            for _name, _distances in _distancesByName.items()
+        }
+    ).round(2)
+    mo.vstack([_histogramFigure, mo.md("**Signed distance, in mm**"), _statistics])
     return
 
 
