@@ -21,7 +21,7 @@ when matching files are touched. Agents for recurring jobs live in `.claude/agen
 | Run the app | `uv run python main.py` |
 | Packaging self-test | `uv run python main.py --selftest` |
 | Windows build | `uv run python build_exe.py` (see README) |
-| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py` |
+| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `scripts/test_random_pose_shape.py` |
 | SphereMesh class test | `scripts/test_sphere_mesh.py` |
 | Fitter tests | `scripts/test_sphere_fit.py`, `scripts/test_sphere_fit_inflation.py` |
 | Topology tests | `scripts/test_topology_{bumpers,sdf_torch,sections,validate,roundtrip,fit}.py` |
@@ -142,3 +142,17 @@ Topology docs:
     `MainWindow._on_show_heatmap` / `_refresh_heatmap_if_stale`.
   - Tests: `scripts/test_sphere_mesh.py` (class, against `bumpers.py`),
     `scripts/test_spheremesh_port.py` (GUI).
+- **CSV pose and shape pickers (2026-10):**
+  - What it does: "Random pose (CSV)" (Theta Controls) and "Random shape (CSV)" (Beta
+    Controls, replacing the old uniform Randomize) pick a row of `data/random_pose.csv` /
+    `data/random_shapes.csv` (10 betas per row, no header), never the one shown. A slider
+    under each button shows the row and applies every row it passes while dragged.
+    - Position 0 is the rest pose / all betas 0; Reset moves the slider back to 0.
+    - A hand edit (joint or beta slider, Load betas) adds "(edited)" to the label.
+  - The beta sliders span ±3.0 (`BETA_SLIDER_INT_MIN/MAX` = ±30), which covers every CSV
+    shape.
+  - The rows are read once at startup; the applied row is a copy, because the joint slider
+    edits `theta` in place.
+  - Code: `CsvRowSlider`, `ThetaSliderGroup._apply_random_pose_row`,
+    `BetaSliderGroup._apply_random_shape_row`.
+  - Test: `scripts/test_random_pose_shape.py`.

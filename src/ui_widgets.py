@@ -44,9 +44,10 @@ DEFAULT_BETA: tuple[float, ...] = (
     0.0,
     0.0
     )
-# Slider internal value I represents beta = I/10. Wide range avoids clipping loaded defaults/text betas.
-BETA_SLIDER_INT_MIN = -20
-BETA_SLIDER_INT_MAX = 20
+# Slider internal value I represents beta = I/10. Wide range avoids clipping loaded defaults/text betas;
+# +-3.0 covers every row of data/random_shapes.csv.
+BETA_SLIDER_INT_MIN = -30
+BETA_SLIDER_INT_MAX = 30
 
 SPHEREMESH_TXT_TITLE = "Sphere Mesh 2.0"
 
@@ -72,6 +73,7 @@ HEATMAP_SCALARS_NAME = "heatmap"
 HEATMAP_CUTOFF_TEXT_NAME = "heatmap_cutoff_text"
 
 _RANDOM_POSE_CSV = data_file("random_pose.csv")
+_RANDOM_SHAPE_CSV = data_file("random_shapes.csv")
 
 
 def _random_pose_csv_column_order():
@@ -82,6 +84,39 @@ def _random_pose_csv_column_order():
         for d in range(3):
             cols.append(f"theta_{jn}_{d}")
     return cols
+
+
+def _load_random_pose_rows() -> list[tc.Tensor]:
+    """The valid 72-value rows of ``data/random_pose.csv`` in file order; [] if it is missing."""
+    if not _RANDOM_POSE_CSV.is_file():
+        return []
+    pose_columns = _random_pose_csv_column_order()
+    pose_rows = []
+    with _RANDOM_POSE_CSV.open(newline="", encoding="utf-8") as pose_file:
+        for csv_row in csv.DictReader(pose_file):
+            try:
+                pose_values = [float(csv_row[column]) for column in pose_columns]
+            except (KeyError, TypeError, ValueError):
+                continue
+            pose_rows.append(tc.tensor(pose_values, dtype=tc.float64))
+    return pose_rows
+
+
+def _load_random_shape_rows() -> list[tc.Tensor]:
+    """The 10-beta rows of ``data/random_shapes.csv`` (no header) in file order; [] if it is missing."""
+    if not _RANDOM_SHAPE_CSV.is_file():
+        return []
+    shape_rows = []
+    with _RANDOM_SHAPE_CSV.open(newline="", encoding="utf-8") as shape_file:
+        for csv_row in csv.reader(shape_file):
+            try:
+                beta_values = [float(value) for value in csv_row]
+            except ValueError:
+                continue  # a header line, should the file ever get one
+            if len(beta_values) != 10:
+                continue
+            shape_rows.append(tc.tensor(beta_values, dtype=tc.float64))
+    return shape_rows
 
 
 def _sample_color_ramp(anchors, count):
@@ -567,24 +602,103 @@ class GenderSelector(QGroupBox):
         return self.gender
 
 
+class CsvRowSlider(QWidget):
+    """A label and a slider stepping through the rows of a CSV; position 0 means no row.
+
+    The slider emits on every value change, not only on release, so dragging it applies each
+    row it passes over.
+    """
+
+    rowSelected = pyqtSignal(int)  # 1-based row number, or 0 for none
+
+    def __init__(self, row_noun: str, none_description: str, row_count: int, parent=None):
+        super().__init__(parent)
+        self.row_noun = row_noun
+        self.none_description = none_description
+        self.row_count = row_count
+        # True once the values were changed by hand after the shown row was applied.
+        self.edited = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QLabel()
+        layout.addWidget(self.label)
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(row_count)
+        self.slider.setSingleStep(1)
+        self.slider.setPageStep(1)
+        self.slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.slider.setTickInterval(1)
+        self.slider.setEnabled(row_count > 0)
+        self.slider.valueChanged.connect(self._on_value_changed)
+        layout.addWidget(self.slider)
+        self._update_label()
+
+    def select_random_row(self):
+        """Move to a random row other than the one shown and emit rowSelected for it."""
+        current_row = self.slider.value()
+        candidate_rows = [row for row in range(1, self.row_count + 1) if row != current_row]
+        chosen_row = random.choice(candidate_rows or [current_row])
+        # Setting the value the slider already holds emits nothing, so emit by hand.
+        self.slider.blockSignals(True)
+        self.slider.setValue(chosen_row)
+        self.slider.blockSignals(False)
+        self._on_value_changed(chosen_row)
+
+    def clear(self):
+        """Move to position 0 without emitting, for a Reset that applied the zeros itself."""
+        self.slider.blockSignals(True)
+        self.slider.setValue(0)
+        self.slider.blockSignals(False)
+        self.edited = False
+        self._update_label()
+
+    def mark_edited(self):
+        """Record that the values were changed by hand since the shown row was applied."""
+        self.edited = True
+        self._update_label()
+
+    def _on_value_changed(self, row):
+        """Show the new row and emit it."""
+        self.edited = False
+        self._update_label()
+        self.rowSelected.emit(row)
+
+    def _update_label(self):
+        """Show the row number out of the count, or none, and whether it was edited since."""
+        row = self.slider.value()
+        if self.row_count == 0:
+            text = f"{self.row_noun}: no CSV rows found"
+        elif row == 0:
+            text = f"{self.row_noun}: none ({'edited' if self.edited else self.none_description})"
+        else:
+            text = f"{self.row_noun} {row} / {self.row_count}" + (" (edited)" if self.edited else "")
+        self.label.setText(text)
+
+
 class BetaSliderGroup(QGroupBox):
-    """Group box containing 10 beta sliders with randomize and reset buttons"""
-    
+    """Group box containing 10 beta sliders, a CSV shape picker and a reset button"""
+
     valuesChanged = pyqtSignal(tc.Tensor)  # Signal emitted when any slider changes
-    
+
     def __init__(self, parent=None):
         super().__init__("▶ Beta Controls", parent)
 
         self.beta = default_beta_tensor().clone()
         self.sliders_list = []
         self.slider_labels = []
-        
+        self.random_shape_rows = _load_random_shape_rows()
+
         self.setCheckable(True)
         self.setChecked(False)
         self.toggled.connect(self._toggle_and_update_arrow)
-        
+
         self._setup_ui()
-        
+        # A non-zero DEFAULT_BETA is neither "all betas 0" nor a CSV row.
+        if bool((self.beta != 0).any()):
+            self.random_shape_slider.mark_edited()
+
         # Hide all widgets initially since we start collapsed
         self._toggle_visibility(False)
     
@@ -629,18 +743,23 @@ class BetaSliderGroup(QGroupBox):
 
         # Create horizontal layout for buttons
         button_layout = QHBoxLayout()
-        
-        random_button = QPushButton("Randomize")
-        random_button.clicked.connect(self.randomize)
-        button_layout.addWidget(random_button)
-        
+
+        self.random_shape_button = QPushButton("Random shape (CSV)")
+        self.random_shape_button.clicked.connect(self.apply_random_shape_from_csv)
+        button_layout.addWidget(self.random_shape_button)
+
         reset_button = QPushButton("Reset")
         reset_button.clicked.connect(self.reset)
         button_layout.addWidget(reset_button)
-        
+
         layout.addLayout(button_layout)
+
+        self.random_shape_slider = CsvRowSlider("Shape", "all betas 0", len(self.random_shape_rows))
+        self.random_shape_slider.rowSelected.connect(self._apply_random_shape_row)
+        layout.addWidget(self.random_shape_slider)
+
         self.setLayout(layout)
-    
+
     def _on_slider_changed(self, idx, value):
         """Handle slider value changes"""
         decimal_value = value / 10.0
@@ -648,20 +767,36 @@ class BetaSliderGroup(QGroupBox):
             f"Beta {idx+1}: {_format_beta_label(decimal_value)}"
         )
         self.beta[idx] = decimal_value
+        self.random_shape_slider.mark_edited()
         self.valuesChanged.emit(self.beta)
-    
-    def randomize(self):
-        """Randomize all slider values"""
-        for idx, slider in enumerate(self.sliders_list):
-            random_value = np.round(np.random.uniform(-2, 2), 1)
-            slider.blockSignals(True)
-            slider.setValue(int(random_value * 10))
-            slider.blockSignals(False)
-            self.beta[idx] = random_value
-            self.slider_labels[idx].setText(
-                f"Beta {idx+1}: {_format_beta_label(random_value)}"
-            )
+
+    def apply_random_shape_from_csv(self):
+        """Apply a random shape row of ``data/random_shapes.csv`` other than the one shown."""
+        if not self.random_shape_rows:
+            if not _RANDOM_SHAPE_CSV.is_file():
+                QMessageBox.warning(self, "Random shape", f"Shape file not found:\n{_RANDOM_SHAPE_CSV}")
+            else:
+                QMessageBox.warning(self, "Random shape", "No valid rows of 10 betas in CSV.")
+            return
+        self.random_shape_slider.select_random_row()
+
+    def _apply_random_shape_row(self, row):
+        """Apply CSV shape ``row`` (1-based), or all betas 0 for row 0."""
+        if row == 0:
+            self._set_beta_values([0.0] * 10)
+        else:
+            self._set_beta_values(self.random_shape_rows[row - 1].tolist())
         self.valuesChanged.emit(self.beta)
+
+    def _set_beta_values(self, beta_values):
+        """Write beta_values into self.beta and move the sliders and labels to match, without emitting."""
+        for beta_index, beta_value in enumerate(beta_values):
+            beta_value = float(beta_value)
+            self.beta[beta_index] = beta_value
+            self.sliders_list[beta_index].blockSignals(True)
+            self.sliders_list[beta_index].setValue(_slider_int_for_beta(beta_value))
+            self.sliders_list[beta_index].blockSignals(False)
+            self.slider_labels[beta_index].setText(f"Beta {beta_index+1}: {_format_beta_label(beta_value)}")
 
     def load_betas_from_text(self):
         """Parse 10 comma-separated floats from the line edit and apply as betas."""
@@ -684,14 +819,8 @@ class BetaSliderGroup(QGroupBox):
                 self, "Beta", "Could not parse one or more values as numbers."
             )
             return
-        for idx, v in enumerate(raw):
-            v = float(v)
-            self.beta[idx] = v
-            slider_value = _slider_int_for_beta(v)
-            self.sliders_list[idx].blockSignals(True)
-            self.sliders_list[idx].setValue(slider_value)
-            self.sliders_list[idx].blockSignals(False)
-            self.slider_labels[idx].setText(f"Beta {idx+1}: {_format_beta_label(v)}")
+        self._set_beta_values(raw)
+        self.random_shape_slider.mark_edited()
         self.valuesChanged.emit(self.beta)
 
     def reset(self):
@@ -702,6 +831,7 @@ class BetaSliderGroup(QGroupBox):
             slider.blockSignals(False)
             self.beta[idx] = 0.0
             self.slider_labels[idx].setText(f"Beta {idx+1}: 0.0")
+        self.random_shape_slider.clear()
         self.valuesChanged.emit(self.beta)
     
     def _toggle_and_update_arrow(self, checked):
@@ -739,7 +869,8 @@ class ThetaSliderGroup(QGroupBox):
         self.theta = tc.zeros(72, dtype=tc.float64)
         self.current_joint_idx = 0
         self.current_dimension = 0  # 0=X, 1=Y, 2=Z
-        
+        self.random_pose_rows = _load_random_pose_rows()
+
         self.setCheckable(True)
         self.setChecked(False)
         self.toggled.connect(self._toggle_and_update_arrow)
@@ -803,10 +934,14 @@ class ThetaSliderGroup(QGroupBox):
         reset_button.clicked.connect(self.reset)
         layout.addWidget(reset_button)
 
-        random_pose_button = QPushButton("Random pose (CSV)")
-        random_pose_button.clicked.connect(self.apply_random_pose_from_csv)
-        layout.addWidget(random_pose_button)
-        
+        self.random_pose_button = QPushButton("Random pose (CSV)")
+        self.random_pose_button.clicked.connect(self.apply_random_pose_from_csv)
+        layout.addWidget(self.random_pose_button)
+
+        self.random_pose_slider = CsvRowSlider("Pose", "rest pose", len(self.random_pose_rows))
+        self.random_pose_slider.rowSelected.connect(self._apply_random_pose_row)
+        layout.addWidget(self.random_pose_slider)
+
         self.setLayout(layout)
     
     def _get_current_theta_idx(self):
@@ -840,44 +975,41 @@ class ThetaSliderGroup(QGroupBox):
         self.slider_label.setText(f"{joint_name} {axis_name} (θ{theta_idx}): {decimal_value:.1f}")
         
         self.theta[theta_idx] = decimal_value
+        self.random_pose_slider.mark_edited()
         self.valuesChanged.emit(self.theta)
-    
+
     def reset(self):
         """Reset all theta values to 0"""
         self.theta = tc.zeros(72, dtype=tc.float64)
         self.slider.blockSignals(True)
         self.slider.setValue(0)
         self.slider.blockSignals(False)
-        
+
         theta_idx = self._get_current_theta_idx()
         joint_name = JOINT_INDEX_TO_LABEL.get(self.current_joint_idx, f"Joint {self.current_joint_idx}")
         axis_name = ['X', 'Y', 'Z'][self.current_dimension]
         self.slider_label.setText(f"{joint_name} {axis_name} (θ{theta_idx}): 0.0")
-        
+
+        self.random_pose_slider.clear()
         self.valuesChanged.emit(self.theta)
-    
+
     def apply_random_pose_from_csv(self):
-        """Pick a random pose row from ``data/random_pose.csv`` and apply thetas."""
-        path = _RANDOM_POSE_CSV
-        if not path.is_file():
-            QMessageBox.warning(self, "Random pose", f"Pose file not found:\n{path}")
+        """Apply a random pose row of ``data/random_pose.csv`` other than the one shown."""
+        if not self.random_pose_rows:
+            if not _RANDOM_POSE_CSV.is_file():
+                QMessageBox.warning(self, "Random pose", f"Pose file not found:\n{_RANDOM_POSE_CSV}")
+            else:
+                QMessageBox.warning(self, "Random pose", "No valid pose rows in CSV.")
             return
-        cols = _random_pose_csv_column_order()
-        tensors = []
-        with path.open(newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                try:
-                    vals = [float(row[c]) for c in cols]
-                except (KeyError, TypeError, ValueError):
-                    continue
-                if len(vals) != 72:
-                    continue
-                tensors.append(tc.tensor(vals, dtype=tc.float64))
-        if not tensors:
-            QMessageBox.warning(self, "Random pose", "No valid pose rows in CSV.")
-            return
-        self.theta = random.choice(tensors)
+        self.random_pose_slider.select_random_row()
+
+    def _apply_random_pose_row(self, row):
+        """Apply CSV pose ``row`` (1-based), or the rest pose for row 0."""
+        if row == 0:
+            self.theta = tc.zeros(72, dtype=tc.float64)
+        else:
+            # A copy, because the joint slider edits self.theta in place and must not alter the stored row.
+            self.theta = self.random_pose_rows[row - 1].clone()
         self._on_selection_changed()
         self.valuesChanged.emit(self.theta)
     
