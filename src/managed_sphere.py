@@ -31,6 +31,9 @@ class ManagedSphere:
         self.secondary_joint = None
         self.secondary_rest_offset = None
         self.lbs_weight = 1.0
+        # (24,) joint weights for LBS posing, derived from the SMPL skin weights at runtime and
+        # never saved. None until derived; all zeros means "derived, stays rigid".
+        self.lbs_joint_weights = None
         self.rest_radius = None
         self.nearest_vertex_index = None
         self.locked = False
@@ -157,6 +160,18 @@ class ManagedSphere:
 
     def get_lbs_weight(self) -> float:
         return self.lbs_weight
+
+    def set_lbs_joint_weights(self, joint_weights):
+        """Store the (24,) LBS joint weights, or None to have them derived again."""
+        self.lbs_joint_weights = (
+            np.array(joint_weights, dtype=np.float64) if joint_weights is not None else None
+        )
+
+    def get_lbs_joint_weights(self):
+        """The (24,) LBS joint weights, or None when they have not been derived yet."""
+        if self.lbs_joint_weights is None:
+            return None
+        return self.lbs_joint_weights.copy()
 
     def set_rest_radius(self, rest_radius):
         self.rest_radius = None if rest_radius is None else float(rest_radius)

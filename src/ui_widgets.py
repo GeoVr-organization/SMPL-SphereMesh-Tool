@@ -201,17 +201,23 @@ def default_beta_tensor() -> tc.Tensor:
 class Skeleton:
     """Simple skeleton class to store joint and kinematic tree information"""
 
-    def __init__(self, joints, kintree, Rs, *, rs_are_global: bool = True):
+    def __init__(self, joints, kintree, Rs, *, rs_are_global: bool = True, world_transforms=None):
         """
         Args:
             joints: Joint positions in world space (J, 3).
             kintree: Parent index per joint.
             Rs: Global (J, 3, 3) world rotations per joint, or per-bone locals if
                 ``rs_are_global=False`` (then composed along ``kintree`` as in classic SMPL).
+            world_transforms: SMPL's FK world transforms (J, 4, 4), or None. LBS posing
+                needs them: ``joints`` are regressed from the posed mesh and sit up to a
+                few millimetres from the FK joint translations once posed.
         """
         self.joints = joints  # Joint positions (already in world space)
         self.kintree = np.asarray(kintree, dtype=np.int64).reshape(-1)
         self.Rs = np.asarray(Rs, dtype=np.float64)
+        self.world_transforms = (
+            np.asarray(world_transforms, dtype=np.float64) if world_transforms is not None else None
+        )
         if rs_are_global:
             self.global_Rs = self.Rs
         else:
@@ -862,7 +868,8 @@ class ThetaSliderGroup(QGroupBox):
     """Group box containing a joint selector dropdown and slider with reset button"""
     
     valuesChanged = pyqtSignal(tc.Tensor)  # Signal emitted when slider changes
-    
+    lbsBindingToggled = pyqtSignal(bool)  # LBS binding checkbox: True = LBS, False = rigid
+
     def __init__(self, parent=None):
         super().__init__("▶ Theta Controls", parent)
         
@@ -941,6 +948,16 @@ class ThetaSliderGroup(QGroupBox):
         self.random_pose_slider = CsvRowSlider("Pose", "rest pose", len(self.random_pose_rows))
         self.random_pose_slider.rowSelected.connect(self._apply_random_pose_row)
         layout.addWidget(self.random_pose_slider)
+
+        self.lbs_binding_checkbox = QCheckBox("LBS binding (blend joints)")
+        self.lbs_binding_checkbox.setChecked(True)
+        self.lbs_binding_checkbox.setToolTip(
+            "Each sphere follows a weighted blend of up to 4 joints, averaged from the SMPL skin "
+            "weights at its 20 nearest body vertices: the body's own deformation model.\n"
+            "Off = rigid single-joint binding (parent joint only)."
+        )
+        self.lbs_binding_checkbox.toggled.connect(self.lbsBindingToggled.emit)
+        layout.addWidget(self.lbs_binding_checkbox)
 
         self.setLayout(layout)
     
@@ -2153,6 +2170,7 @@ class MainWindow(QMainWindow):
         # Add theta slider group
         self.theta_slider_group = ThetaSliderGroup()
         self.theta_slider_group.valuesChanged.connect(self._on_theta_changed)
+        self.theta_slider_group.lbsBindingToggled.connect(self._on_lbs_binding_toggled)
         self.ui_layout.addWidget(self.theta_slider_group)
         
         self.ui_layout.addStretch()  # Push items to top
@@ -2234,7 +2252,10 @@ class MainWindow(QMainWindow):
         self.checkbox_uniform_radius_preview.stateChanged.connect(self.toggle_uniform_radius_preview)
         self.checkbox_mirror_edits.stateChanged.connect(self.toggle_mirror_edits)
         self.sphere_manager.set_mirror_edits_enabled(self.checkbox_mirror_edits.isChecked())
-        
+        self.sphere_manager.set_lbs_binding_enabled(
+            self.theta_slider_group.lbs_binding_checkbox.isChecked()
+        )
+
         # Link sphere manager to info panel
         self.info_panel.sphere_manager = self.sphere_manager
         
@@ -2274,7 +2295,7 @@ class MainWindow(QMainWindow):
       
         
         # Initialize skeleton information in sphere manager
-        self._update_skeleton(verts, joints, Rs, rs_are_global=_smpl_rs_are_global)
+        self._update_skeleton(verts, joints, Rs, rs_are_global=_smpl_rs_are_global, world_transforms=T)
         
         # Position info panel (top-right) and clip planes panel (bottom-left)
         def on_resize(event):
@@ -2286,6 +2307,7 @@ class MainWindow(QMainWindow):
         try:
             self.sphere_manager.load_from_json(str(load_path))
             self.sphere_manager.initialize_radius_scaling_from_mesh(mesh)
+            self.sphere_manager.report_lbs_binding_status()
         except (ValueError, OSError, json.JSONDecodeError) as e:
             print(f"Could not load {load_path}: {e}")
 
@@ -2496,16 +2518,21 @@ class MainWindow(QMainWindow):
         self.clip_planes_panel.setVisible(vis)
         return vis
 
-    def _update_skeleton(self, verts, joints, Rs, *, rs_are_global: bool = True):
+    def _update_skeleton(self, verts, joints, Rs, *, rs_are_global: bool = True, world_transforms=None):
         """Update skeleton information in sphere manager"""
         joints_np = joints.detach().cpu().numpy()
         Rs_np = Rs.detach().cpu().numpy()
         if Rs_np.shape[-1] == 4:
             Rs_np = Rs_np[..., :3, :3]
         kintree = self.smpl_model.parents
+        world_transforms_np = (
+            world_transforms.detach().cpu().numpy() if world_transforms is not None else None
+        )
 
         # Create current skeleton
-        self.sphere_manager.skeleton = Skeleton(joints_np, kintree, Rs_np, rs_are_global=rs_are_global)
+        self.sphere_manager.skeleton = Skeleton(
+            joints_np, kintree, Rs_np, rs_are_global=rs_are_global, world_transforms=world_transforms_np
+        )
 
         # Initialize rest skeleton if not already set (must match self.beta so FK rest_offset matches the mesh).
         if self.sphere_manager.rest_skeleton is None:
@@ -2763,7 +2790,17 @@ class MainWindow(QMainWindow):
         """Handle theta value changes from slider group"""
         self.theta = theta
         self.update_smplmodel(update_radius=False,update_pose=True)
-    
+
+    def _on_lbs_binding_toggled(self, enabled: bool):
+        """Switch sphere FK between the rigid single-joint bind and LBS, and re-pose at once.
+
+        The same call as a theta change with the same theta, so beta offsets, the heatmap,
+        the InfoPanel and the render follow. Not an edit: the unsaved flag stays as it is.
+        """
+        self.sphere_manager.set_lbs_binding_enabled(enabled)
+        self.sphere_manager.report_lbs_binding_status()
+        self.update_smplmodel(update_radius=False, update_pose=True)
+
     def _on_opacity_changed(self, value):
         """Handle opacity slider changes"""
         opacity = value / 100.0
@@ -2800,7 +2837,7 @@ class MainWindow(QMainWindow):
             mesh.Modified()
             
             # Update skeleton in sphere manager
-            self._update_skeleton(verts, joints, Rs, rs_are_global=rs_are_global)
+            self._update_skeleton(verts, joints, Rs, rs_are_global=rs_are_global, world_transforms=T)
 
             # CSV blendshapes when loaded; otherwise FK + mesh-based radii.
             if self.sphere_manager.has_beta_offsets_loaded():
@@ -2862,6 +2899,7 @@ class MainWindow(QMainWindow):
                 mesh = pv.wrap(mesh_vtk)
         if mesh is not None:
             self.sphere_manager.initialize_radius_scaling_from_mesh(mesh)
+        self.sphere_manager.report_lbs_binding_status()
 
     def load_topology_from_file(self):
         """Load topology from file and replace existing spheres/connections."""
@@ -3208,6 +3246,7 @@ class MainWindow(QMainWindow):
         if not self.sphere_manager:
             return
         self.sphere_manager.reassign_parent_joints_all()
+        self.sphere_manager.report_lbs_binding_status()
         self.info_panel.update_selected_info()
         self.plotter.render()
 

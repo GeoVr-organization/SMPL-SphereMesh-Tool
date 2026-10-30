@@ -362,11 +362,23 @@ def main() -> int:
     theta[16 * 3 + 2] = -0.8  # left shoulder
     theta[18 * 3 + 1] = -1.0  # left elbow
     theta[1 * 3 + 0] = -0.6   # left hip
+    # The exact-midpoint rule belongs to the rigid binding; LBS gives the new sphere its own
+    # joint weights, so there it is only close.
+    lbs_checkbox = window.theta_slider_group.lbs_binding_checkbox
+    lbs_checkbox.setChecked(False)
     window._on_theta_changed(theta)
     shared_midpoint = np.mean([manager.spheres[i].get_center() for i in shared_joint_cone], axis=0)
     check(
         np.allclose(manager.spheres[shared_cone_sphere].get_center(), shared_midpoint, atol=1e-9),
-        "posed: shared-joint sphere stays at the endpoints' midpoint",
+        "posed, rigid binding: shared-joint sphere stays at the endpoints' midpoint",
+    )
+    lbs_checkbox.setChecked(True)
+    shared_midpoint = np.mean([manager.spheres[i].get_center() for i in shared_joint_cone], axis=0)
+    lbs_midpoint_gap = float(np.linalg.norm(manager.spheres[shared_cone_sphere].get_center() - shared_midpoint))
+    check(
+        lbs_midpoint_gap < 0.01,
+        "posed, LBS binding: shared-joint sphere stays within 1 cm of the endpoints' midpoint",
+        f"{lbs_midpoint_gap * 1000:.2f} mm",
     )
     window._on_theta_changed(tc.zeros(72, dtype=tc.float64))
 

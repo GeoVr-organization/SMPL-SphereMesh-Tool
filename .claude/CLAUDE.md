@@ -21,7 +21,8 @@ when matching files are touched. Agents for recurring jobs live in `.claude/agen
 | Run the app | `uv run python main.py` |
 | Packaging self-test | `uv run python main.py --selftest` |
 | Windows build | `uv run python build_exe.py` (see README) |
-| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `scripts/test_random_pose_shape.py` |
+| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `scripts/test_random_pose_shape.py`, `scripts/test_lbs_binding.py` |
+| Rigid vs LBS binding against the posed body | `uv run python scripts/compare_binding_modes.py [--json out.json]` |
 | SphereMesh class test | `scripts/test_sphere_mesh.py` |
 | Fitter tests | `scripts/test_sphere_fit.py`, `scripts/test_sphere_fit_inflation.py` |
 | Topology tests | `scripts/test_topology_{bumpers,sdf_torch,sections,validate,roundtrip,fit}.py` |
@@ -68,11 +69,21 @@ Topology docs:
   - New spheres are appended, never inserted.
   - Duplicate connections exist (the female template has `(0, 1)` three times), so
     identify a connection by its object, not by its index tuple.
-- Binding is rigid and single-joint: `center = J[p] + R[p] @ rest_offset`.
-  - `secondary_joint` and `lbs_weight` are stored, but the blend that would use them is
-    commented out.
+- Binding has two modes, switched by "LBS binding" in Theta Controls. It is **on (LBS) by
+  default** in the GUI; a bare `SphereManager`, as scripts build it, is rigid.
+  - Rigid: `center = J[p] + R[p] @ rest_offset`, where `J` is regressed from the posed mesh.
+  - LBS: `center = Σ w_k (R_k c_rest + t_k)` over up to 4 joints, built from SMPL's FK
+    transforms (`Skeleton.world_transforms`). The FK joints differ from the regressed `J` by
+    up to 4.6 mm once posed, so a one-joint LBS sphere is not the rigid one.
+  - The weights live on the sphere (`ManagedSphere.lbs_joint_weights`) and are never saved.
+    They are derived from the 20 nearest rest vertices and re-derived on rebinding and on
+    every beta change.
+  - `secondary_joint` and `lbs_weight` are stored, but neither mode uses them; the old blend
+    is commented out.
   - Dragging a sphere does not update `rest_offset`. The next pose change snaps it back
     until "Reassign all parents" is pressed.
+  - Code that turns a posed centre back into `rest_offset` must use
+    `SphereManager._rest_offset_from_posed_center`, which inverts the active mode.
 - Loading rounds centres to 3 decimals.
 - `save_to_json` drops `quad_groups`.
 - `rest_radius` is a ratio (radius ÷ distance to the nearest vertex), not a length.
@@ -156,3 +167,27 @@ Topology docs:
   - Code: `CsvRowSlider`, `ThetaSliderGroup._apply_random_pose_row`,
     `BetaSliderGroup._apply_random_shape_row`.
   - Test: `scripts/test_random_pose_shape.py`.
+- **LBS binding (2026-10):**
+  - What it does: with "LBS binding (blend joints)" checked (Theta Controls, on by default),
+    each sphere centre follows a blend of up to 4 SMPL joints instead of only its parent joint.
+    Unchecked gives exactly the old rigid FK. Toggling re-poses at once and is not an edit.
+  - The weights average the SMPL skin weights of the sphere's 20 nearest rest vertices,
+    inverse-distance weighted (`1/(d + 0.1 r)`, base radius). Only vertices whose dominant
+    joint is the parent joint, its parent or a child count. The strongest 4 joints are kept
+    and renormalised. These are the ClothSimulator26 engine's rules.
+  - Posed edits (InfoPanel centre, To joint / To bone, Fit spheres) invert the active mode,
+    so they stay put on the next pose. In LBS mode the weights are re-solved for the new rest
+    centre, so a later toggle or beta tick moves them only as much as the body moves. The
+    exception is the crotch spheres, whose weights flip between two sets (up to 19 mm,
+    measured).
+  - Known weakness, measured with `compare_binding_modes.py`: with the engine's gate, the
+    collider pokes through the skin about 30 mm deeper at the hips than with rigid. The cause
+    is the big pelvis spheres splitting their weight between both hips. See the brief's §13.3
+    for the measured alternative gates.
+  - A status line `[lbs] joint weights for N spheres: neighbour distance ...` is printed on
+    toggle-on, load and Reassign all parents.
+  - Design and measurements: `spheremesh_lbs_binding_brief.md`.
+  - Code: `SphereManager._derive_lbs_joint_weights`, `_skinning_transforms`, `_lbs_blend`,
+    `_rest_offset_from_posed_center`, `update_sphere_positions`;
+    `MainWindow._on_lbs_binding_toggled`.
+  - Tests: `scripts/test_lbs_binding.py`; measurement: `scripts/compare_binding_modes.py`.

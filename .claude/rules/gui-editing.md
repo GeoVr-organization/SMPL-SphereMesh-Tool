@@ -61,9 +61,29 @@ Any code that adds, removes or changes spheres or connections must keep all of t
 - `set_center` and `set_radius` do nothing on a locked sphere. Use the `*_force` variants
   only for pose, preview or beta overrides.
 
-## Binding (rigid, single-joint)
-- FK, in `update_sphere_positions`: `center = J[p] + R[p] @ rest_offset`. Spheres with no
-  binding are skipped.
+## Binding (rigid or LBS)
+- FK, in `update_sphere_positions`:
+  - Rigid: `center = J[p] + R[p] @ rest_offset`.
+  - LBS mode (`lbs_binding_enabled`, the Theta Controls checkbox, on by default in the GUI):
+    the rigid centre is computed first and then overridden by `Σ w_k (R_k c_rest + t_k)`.
+    With the box off, the loop runs exactly the old code.
+  - Spheres with no binding are skipped.
+- LBS joint weights live on the sphere (`ManagedSphere.lbs_joint_weights`); None means "not
+  derived yet", and the next LBS pose derives them.
+  - Any code that changes a sphere's `parent_joint`/`rest_offset` by *rebinding* must clear
+    them. `assign_parent_joint` does; a new sphere starts without any.
+  - `set_rest_mesh_points` (every rest-skeleton rebuild, i.e. every beta change) clears all
+    of them.
+  - `report_lbs_binding_status` only fills in missing weights; it never overwrites them.
+- Turning a **posed** centre back into `rest_offset` must go through
+  `_rest_offset_from_posed_center`, which inverts the active mode.
+  - A rigid inverse in LBS mode makes the sphere jump on the next pose (measured: 24 mm for
+    one sphere).
+  - In LBS mode it alternates "solve the rest centre" and "re-derive the weights there", and
+    stores the pair whose re-derivation would move the sphere least. A later beta tick or
+    toggle then moves most spheres only as much as the body moves.
+  - Crotch spheres can have two weight sets that derive each other, and they still jump
+    (measured: up to 19 mm after a posed Fit and a 0.01 beta tick).
 - `assign_parent_joint(i)` picks the closest kintree bone (`_closest_bone`) on
   `rest_skeleton`, using the sphere's **current** centre. That is only correct at the rest
   pose.

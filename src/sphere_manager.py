@@ -33,6 +33,15 @@ SPHERE_CLASS_COLOR = "#ee380a"      # red: spheres
 CAPSULOID_CLASS_COLOR = "#2f76b9"   # blue: capsuloids (cones between 2 spheres)
 PRYSMOID_CLASS_COLOR = "#9545d6"    # violet: prysmoids (slabs between 3 spheres)
 
+# LBS binding: each sphere follows a blend of up to 4 joints, averaged from the SMPL skin
+# weights of its nearest rest-pose vertices (spheremesh_lbs_binding_brief.md). Same values as
+# the ClothSimulator26 engine, so the tool previews what the engine does.
+LBS_NEIGHBOUR_COUNT = 20          # rest vertices averaged per sphere
+LBS_DISTANCE_SOFTEN = 0.1         # inverse-distance softening, as a fraction of the sphere's base radius
+LBS_MAX_JOINTS = 4                # joints kept per sphere, as SMPL keeps per vertex
+LBS_MIN_BLEND_DETERMINANT = 0.05  # |det of the blended rotation| floor; below it the sphere stays rigid
+LBS_INVERSE_ITERATIONS = 8        # posed-edit rounds of solve-rest-centre / re-derive-weights
+
 # ---------------------------------------------------------------------------
 # Beta-offset constants
 # ---------------------------------------------------------------------------
@@ -68,6 +77,11 @@ class SphereManager:
         self.rest_skeleton = None
         self.skinning_weights = None   # (N_verts, N_joints) float array from SMPL model
         self.rest_mesh_points = None   # (N_verts, 3) float array at rest pose
+        self._dominant_joint_per_vertex: Optional[np.ndarray] = None  # (N_verts,) argmax of skinning_weights
+        # Rigid single-joint FK when False. MainWindow syncs it from the Theta Controls
+        # checkbox (on by default); a bare manager, as headless scripts build it, stays rigid.
+        self.lbs_binding_enabled = False
+        self._lbs_missing_transforms_reported = False
         self.lock_button_callback = None
         self.refocus_callback = None
 
@@ -184,10 +198,29 @@ class SphereManager:
     def set_skinning_weights(self, weights) -> None:
         """Store SMPL LBS weights (N_verts × N_joints float64 array)."""
         self.skinning_weights = np.asarray(weights, dtype=np.float64)
+        self._dominant_joint_per_vertex = np.argmax(self.skinning_weights, axis=1)
+        self.invalidate_lbs_joint_weights()
 
     def set_rest_mesh_points(self, points) -> None:
-        """Store SMPL rest-pose vertex positions (N_verts × 3 float64 array)."""
+        """Store SMPL rest-pose vertex positions (N_verts × 3 float64 array).
+
+        Called whenever the rest skeleton is rebuilt (every beta change, a gender switch,
+        startup), so it also drops every sphere's LBS joint weights: they are derived from
+        these points and are re-derived at the new shape on the next LBS pose.
+        """
         self.rest_mesh_points = np.asarray(points, dtype=np.float64)
+        self.invalidate_lbs_joint_weights()
+
+    def set_lbs_binding_enabled(self, enabled: bool) -> None:
+        """Pose spheres with LBS (True) or with the rigid single-joint FK (False)."""
+        self.lbs_binding_enabled = bool(enabled)
+        mode_description = "LBS, up to 4 joints per sphere" if self.lbs_binding_enabled else "rigid, parent joint only"
+        print(f"[lbs] sphere binding: {mode_description}")
+
+    def invalidate_lbs_joint_weights(self) -> None:
+        """Drop every sphere's LBS joint weights so the next LBS pose derives them again."""
+        for sphere in self.spheres:
+            sphere.set_lbs_joint_weights(None)
 
     def set_spheremesh_opacity(self, opacity):
         self.spheremesh_opacity = opacity
@@ -578,8 +611,11 @@ class SphereManager:
         Like assign_parent_joint, the binding lives in the rest skeleton, evaluated at the
         mean of the endpoints' rest positions. Restricting the parent to the endpoints' own
         joints keeps the rigid single-joint rule: a shared joint is reused, which makes the
-        new rest offset the mean of the endpoints' offsets (so the sphere stays at their
-        midpoint in every pose), and mixed endpoints never pull in a third joint.
+        new rest offset the mean of the endpoints' offsets (so under the rigid binding the
+        sphere stays at their midpoint in every pose), and mixed endpoints never pull in a
+        third joint. With LBS on, the new sphere's own joint weights (derived on the next
+        pose) differ from its endpoints', so posed it sits close to, not exactly at, their
+        midpoint.
         """
         if self.rest_skeleton is None:
             return
@@ -878,9 +914,7 @@ class SphereManager:
         parent = sp.get_parent_joint()
         rest_offset = sp.get_rest_offset()
         if self.skeleton is not None and parent is not None and rest_offset is not None:
-            current_joint_pos = self.skeleton.joints[parent]
-            R_current = self.skeleton.get_joint_rotation(parent)
-            new_rest_offset = np.dot(R_current.T, sp.get_center() - current_joint_pos)
+            new_rest_offset = self._rest_offset_from_posed_center(global_index, sp.get_center())
             sp.set_parent_joint(parent, new_rest_offset)
         #self.assign_parent_joint(global_index)
         for c in self._incident_connections(global_index):
@@ -1183,6 +1217,8 @@ class SphereManager:
         #         secondary_rest_offset = np.dot(R_secondary_rest.T, world_offset_2)
 
         sp.set_secondary_joint(secondary_joint, secondary_rest_offset, lbs_weight)
+        # The weights belong to the binding; the next LBS pose derives them for the new one.
+        sp.set_lbs_joint_weights(None)
 
     def reassign_parent_joints_all(self):
         """Recompute parent joint and rest offset for every sphere."""
@@ -1193,9 +1229,225 @@ class SphereManager:
         self.mark_unsaved_changes()
         #self.update_sphere_positions()
 
+    # ---------------------------------------------------------------------------
+    # LBS binding (spheremesh_lbs_binding_brief.md)
+    # ---------------------------------------------------------------------------
+
+    def _lbs_binding_usable(self) -> bool:
+        """True when LBS is on and the skin weights and rest-pose data it derives from exist."""
+        return (
+            self.lbs_binding_enabled
+            and self.skinning_weights is not None
+            and self._dominant_joint_per_vertex is not None
+            and self.rest_mesh_points is not None
+            and self.rest_skeleton is not None
+        )
+
+    def _lbs_gate_joints(self, parent_joint: int) -> set:
+        """Joints whose vertices may lend the sphere their skin weights: one hop from parent_joint.
+
+        Blending must cross a joint, which is one hop in the kintree: the joint itself, its
+        parent and every child, as in the engine. The vertex test uses each vertex's dominant
+        joint, so a vertex is admitted or rejected as a whole.
+        """
+        kintree = self.rest_skeleton.kintree
+        gate_joints = {int(parent_joint)}
+        if kintree[parent_joint] >= 0:
+            gate_joints.add(int(kintree[parent_joint]))
+        gate_joints.update(int(child_joint) for child_joint in np.flatnonzero(kintree == parent_joint))
+        return gate_joints
+
+    def _derive_lbs_joint_weights(
+        self, sphere_index: int, rest_center: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, Optional[float]]:
+        """(joint weights (24,), mean neighbour distance in radii) from the nearest rest vertices.
+
+        Averages the SMPL skin weights of the LBS_NEIGHBOUR_COUNT rest-pose vertices nearest
+        to the sphere's rest centre (its bound one unless rest_center is given),
+        inverse-distance weighted, among the vertices that pass the limb gate; keeps the
+        LBS_MAX_JOINTS strongest joints and renormalises. All-zero weights (and None for the
+        distance) mean no vertex passed the gate, so the sphere stays rigid. One sphere at a
+        time: measured faster than one (spheres x vertices) distance matrix, whose broadcast
+        costs more than the loop.
+        """
+        sphere = self.spheres[sphere_index]
+        parent_joint = int(sphere.get_parent_joint())
+        if rest_center is None:
+            rest_center = self.rest_skeleton.transform_point(sphere.get_rest_offset(), parent_joint)
+        no_weights = np.zeros(self.skinning_weights.shape[1], dtype=np.float64)
+
+        # Gate first, then take the nearest survivors: nearest-then-gate would leave a
+        # crotch sphere with a handful of usable neighbours instead of the nearest valid ones.
+        gate_joints = self._lbs_gate_joints(parent_joint)
+        candidate_vertices = np.flatnonzero(np.isin(self._dominant_joint_per_vertex, list(gate_joints)))
+        if candidate_vertices.size == 0:
+            return no_weights, None
+        distances = np.linalg.norm(self.rest_mesh_points[candidate_vertices] - rest_center, axis=1)
+        neighbour_count = min(LBS_NEIGHBOUR_COUNT, candidate_vertices.size)
+        nearest_candidate_slots = np.argpartition(distances, neighbour_count - 1)[:neighbour_count]
+        base_radius = self._base_radius(sphere_index)
+        vertex_weights = 1.0 / (distances[nearest_candidate_slots] + LBS_DISTANCE_SOFTEN * base_radius)
+        joint_weights = vertex_weights @ self.skinning_weights[candidate_vertices[nearest_candidate_slots]]
+        joint_weights[np.argsort(joint_weights)[:-LBS_MAX_JOINTS]] = 0.0
+        weight_sum = float(joint_weights.sum())
+        if weight_sum <= 1e-8:
+            return no_weights, None
+        mean_distance_in_radii = float(distances[nearest_candidate_slots].mean()) / max(base_radius, 1e-12)
+        return joint_weights / weight_sum, mean_distance_in_radii
+
+    def _lbs_joint_weights_for(self, sphere_index: int) -> np.ndarray:
+        """The sphere's LBS joint weights, derived now if it has none yet."""
+        sphere = self.spheres[sphere_index]
+        joint_weights = sphere.get_lbs_joint_weights()
+        if joint_weights is None:
+            joint_weights, _ = self._derive_lbs_joint_weights(sphere_index)
+            sphere.set_lbs_joint_weights(joint_weights)
+        return joint_weights
+
+    def _skinning_transforms(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """(R_k (24,3,3), t_k (24,3)) of the current pose's skinning transforms, or (None, None).
+
+        A_k = T_k · inverse_bind_k with identity bind rotations, so R_k = T_k[:3,:3] and
+        t_k = T_k[:3,3] - R_k · J_rest_k: what smpl_pytorch blends for the body's vertices.
+        (None, None) unless LBS is on and the current skeleton carries SMPL's FK transforms.
+        """
+        if not self._lbs_binding_usable() or self.skeleton is None:
+            return None, None
+        world_transforms = getattr(self.skeleton, "world_transforms", None)
+        if world_transforms is None:
+            if not self._lbs_missing_transforms_reported:
+                print("[lbs] the skeleton has no FK world transforms; spheres stay rigid")
+                self._lbs_missing_transforms_reported = True
+            return None, None
+        skin_rotations = world_transforms[:, :3, :3]
+        skin_translations = world_transforms[:, :3, 3] - np.einsum(
+            "kij,kj->ki", skin_rotations, np.asarray(self.rest_skeleton.joints, dtype=np.float64)
+        )
+        return skin_rotations, skin_translations
+
+    @staticmethod
+    def _blend_of_joint_weights(
+        joint_weights: np.ndarray, skin_rotations: np.ndarray, skin_translations: np.ndarray
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """(Σ w·R, Σ w·t) for these joint weights, or None when the sphere stays rigid this pose."""
+        if not joint_weights.any():
+            return None
+        blend_rotation = np.einsum("k,kij->ij", joint_weights, skin_rotations)
+        # A blend of joints rotated far apart can cancel towards a singular map. The posed
+        # centre would still be finite, but its inverse (_rest_offset_from_posed_center)
+        # would not; the engine applies the same floor.
+        if abs(float(np.linalg.det(blend_rotation))) < LBS_MIN_BLEND_DETERMINANT:
+            return None
+        return blend_rotation, joint_weights @ skin_translations
+
+    def _lbs_blend(
+        self, sphere_index: int, skin_rotations: np.ndarray, skin_translations: np.ndarray
+    ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """(Σ w·R, Σ w·t) of the sphere's joint weights, or None when it stays rigid this pose."""
+        return self._blend_of_joint_weights(
+            self._lbs_joint_weights_for(sphere_index), skin_rotations, skin_translations
+        )
+
+    def _rest_offset_from_posed_center(self, sphere_index: int, posed_center) -> np.ndarray:
+        """The rest_offset that the active binding mode maps to posed_center under the current pose.
+
+        In LBS mode the weights depend on the rest centre being solved for, so this iterates:
+        solve the rest centre with the current weights, re-derive the weights there, repeat
+        until they stop changing. The weights it ends on are stored on the sphere and the
+        rest centre is solved with exactly them, so posing again lands on posed_center; and
+        because they match that rest centre, the next re-derivation (a beta tick, toggling)
+        does not move the sphere. Keeping the old weights instead measured jumps of up to
+        19 mm on the next beta tick after a posed Fit. The rigid inverse is the expression the
+        editor always used.
+        """
+        sphere = self.spheres[sphere_index]
+        parent = sphere.get_parent_joint()
+        posed_center = np.asarray(posed_center, dtype=np.float64)
+        skin_rotations, skin_translations = self._skinning_transforms()
+        if skin_rotations is not None:
+            joint_weights = self._lbs_joint_weights_for(sphere_index)
+            # Every (weights, rest centre) pair solved together lands exactly on posed_center.
+            # Keep the one whose re-derivation would move the sphere least: 0 at a fixed point,
+            # and the smaller jump where none exists. Measured: the crotch spheres flip between
+            # two weight sets (pelvis-heavy and split between the hips) whose rest centres
+            # each derive the other.
+            best_solution = None
+            best_rederivation_jump = np.inf
+            for _ in range(LBS_INVERSE_ITERATIONS):
+                blend = self._blend_of_joint_weights(joint_weights, skin_rotations, skin_translations)
+                if blend is None:
+                    break
+                blend_rotation, blend_translation = blend
+                rest_center = np.linalg.solve(blend_rotation, posed_center - blend_translation)
+                rederived_weights, _ = self._derive_lbs_joint_weights(sphere_index, rest_center)
+                rederived_blend = self._blend_of_joint_weights(rederived_weights, skin_rotations, skin_translations)
+                rederivation_jump = (
+                    np.inf if rederived_blend is None
+                    else float(np.linalg.norm(rederived_blend[0] @ rest_center + rederived_blend[1] - posed_center))
+                )
+                if rederivation_jump < best_rederivation_jump:
+                    best_solution = (joint_weights, rest_center)
+                    best_rederivation_jump = rederivation_jump
+                if np.allclose(rederived_weights, joint_weights, rtol=0.0, atol=1e-12):
+                    break
+                joint_weights = rederived_weights
+            if best_solution is not None:
+                solved_weights, rest_center = best_solution
+                sphere.set_lbs_joint_weights(solved_weights)
+                return np.dot(
+                    self.rest_skeleton.get_joint_rotation(parent).T,
+                    rest_center - self.rest_skeleton.joints[parent],
+                )
+        current_joint_pos = self.skeleton.joints[parent]
+        R_current = self.skeleton.get_joint_rotation(parent)
+        return np.dot(R_current.T, posed_center - current_joint_pos)
+
+    def report_lbs_binding_status(self) -> None:
+        """Print one status line about every bound sphere's LBS joint weights.
+
+        Derives the weights of spheres that have none and stores them; weights a sphere
+        already has are kept, so a report never moves a sphere edited while posed. Called on
+        switching LBS on, a load and Reassign all parents, never per slider tick. A mean
+        neighbour distance far above one radius points at a stale binding (rest offsets
+        taken while posed).
+        """
+        if not self._lbs_binding_usable():
+            return
+        skin_rotations, skin_translations = self._skinning_transforms()
+        bound_sphere_count = 0
+        no_neighbour_count = 0
+        singular_blend_count = 0
+        distance_in_radii_by_sphere: Dict[int, float] = {}
+        for sphere_index, sphere in enumerate(self.spheres):
+            if sphere.get_parent_joint() is None or sphere.get_rest_offset() is None:
+                continue
+            bound_sphere_count += 1
+            joint_weights, mean_distance_in_radii = self._derive_lbs_joint_weights(sphere_index)
+            if sphere.get_lbs_joint_weights() is None:
+                sphere.set_lbs_joint_weights(joint_weights)
+            if mean_distance_in_radii is None:
+                no_neighbour_count += 1
+                continue
+            distance_in_radii_by_sphere[sphere_index] = mean_distance_in_radii
+            if skin_rotations is not None and self._lbs_blend(sphere_index, skin_rotations, skin_translations) is None:
+                singular_blend_count += 1
+        if not distance_in_radii_by_sphere:
+            print(f"[lbs] no joint weights derived for {bound_sphere_count} bound spheres")
+            return
+        worst_sphere_index = max(distance_in_radii_by_sphere, key=distance_in_radii_by_sphere.get)
+        mean_distance = float(np.mean(list(distance_in_radii_by_sphere.values())))
+        print(
+            f"[lbs] joint weights for {bound_sphere_count} spheres: neighbour distance mean "
+            f"{mean_distance:.2f} radii, worst {distance_in_radii_by_sphere[worst_sphere_index]:.2f} "
+            f"(sphere {worst_sphere_index}); {no_neighbour_count} with no neighbour, "
+            f"{singular_blend_count} singular under the current pose"
+        )
+
     def update_sphere_positions(self):
+        """Pose every bound sphere: rigid on its parent joint, or LBS when lbs_binding_enabled."""
         if self.skeleton is None or self.rest_skeleton is None:
             return
+        skin_rotations, skin_translations = self._skinning_transforms()
         for i, sp in enumerate(self.spheres):
             parent = sp.get_parent_joint()
             rest_offset = sp.get_rest_offset()
@@ -1221,8 +1473,17 @@ class SphereManager:
                 p2 = current_joint_pos_2 + np.dot(current_R_2, secondary_rest_offset)
                 new_center = lbs_weight * p1 + (1.0 - lbs_weight) * p2
             else:
-            '''    
+            '''
             new_center = p1
+
+            # LBS override: the rigid centre above stays the fallback, so with LBS off this
+            # loop runs exactly the code it always ran.
+            if skin_rotations is not None:
+                blend = self._lbs_blend(i, skin_rotations, skin_translations)
+                if blend is not None:
+                    blend_rotation, blend_translation = blend
+                    rest_center = self.rest_skeleton.transform_point(rest_offset, parent)
+                    new_center = blend_rotation @ rest_center + blend_translation
 
             sp.set_center_force(new_center)
 
@@ -1506,10 +1767,8 @@ class SphereManager:
             parent = sphere.get_parent_joint()
             rest_offset = sphere.get_rest_offset()
             if self.skeleton is not None and parent is not None and rest_offset is not None:
-                joint_position = self.skeleton.joints[parent]
-                rotation = self.skeleton.get_joint_rotation(parent)
                 sphere.set_parent_joint(
-                    parent, np.dot(rotation.T, sphere.get_center() - joint_position)
+                    parent, self._rest_offset_from_posed_center(index, sphere.get_center())
                 )
 
         self._refresh_all_connection_meshes()
