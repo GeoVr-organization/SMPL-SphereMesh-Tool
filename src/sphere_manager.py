@@ -41,6 +41,9 @@ LBS_DISTANCE_SOFTEN = 0.1         # inverse-distance softening, as a fraction of
 LBS_MAX_JOINTS = 4                # joints kept per sphere, as SMPL keeps per vertex
 LBS_MIN_BLEND_DETERMINANT = 0.05  # |det of the blended rotation| floor; below it the sphere stays rigid
 LBS_INVERSE_ITERATIONS = 8        # posed-edit rounds of solve-rest-centre / re-derive-weights
+# Joint positions (m) and rotation entries closer than this to the rest skeleton's count as
+# the rest pose, where binding keeps its original rest-frame code path.
+REST_POSE_TOLERANCE = 1e-9
 
 # ---------------------------------------------------------------------------
 # Beta-offset constants
@@ -1104,23 +1107,28 @@ class SphereManager:
         closest = A + t * AB
         return np.linalg.norm(P - closest)
 
-    def _closest_bone(self, point, allowed_parent_joints=None) -> Tuple[Optional[int], Optional[int]]:
-        """(parent, child) of the rest-skeleton bone closest to point; (None, None) if none.
+    def _closest_bone(
+        self, point, allowed_parent_joints=None, skeleton=None
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """(parent, child) of the bone closest to point; (None, None) if none.
 
-        allowed_parent_joints, when given, restricts the search to bones whose parent end
-        is one of those joints.
+        The bones are the rest skeleton's unless another skeleton is given (the posed one,
+        for a point where the sphere is shown). allowed_parent_joints, when given, restricts
+        the search to bones whose parent end is one of those joints.
         """
+        if skeleton is None:
+            skeleton = self.rest_skeleton
         min_dist = np.inf
         best_parent = None
         best_child = None
-        kintree = self.rest_skeleton.kintree
+        kintree = skeleton.kintree
         for i in range(1, len(kintree)):
             p = kintree[i]
             c = i
             if allowed_parent_joints is not None and int(p) not in allowed_parent_joints:
                 continue
-            p_pos = self.rest_skeleton.joints[p]
-            c_pos = self.rest_skeleton.joints[c]
+            p_pos = skeleton.joints[p]
+            c_pos = skeleton.joints[c]
             dist = self.point_segment_distance(point, p_pos, c_pos)
             if dist < min_dist:
                 min_dist = dist
@@ -1141,14 +1149,40 @@ class SphereManager:
             t = 0.0
         return 1.0 - t
 
+    def _is_posed(self) -> bool:
+        """True when the shown skeleton is not the rest skeleton, i.e. some joint is rotated."""
+        if self.skeleton is None or self.rest_skeleton is None:
+            return False
+        return not (
+            np.allclose(self.skeleton.global_Rs, self.rest_skeleton.global_Rs, rtol=0.0, atol=REST_POSE_TOLERANCE)
+            and np.allclose(self.skeleton.joints, self.rest_skeleton.joints, rtol=0.0, atol=REST_POSE_TOLERANCE)
+        )
+
     def assign_parent_joint(self, sphere_index: int):
+        """Bind the sphere where it is shown: closest bone, rest offset, secondary joint.
+
+        The binding lives in the rest frame. Under a pose the shown centre is first carried
+        back through its closest posed bone, and the stored rest offset is the active mode's
+        inverse, so the next FK puts the sphere back where it is; treating a posed centre as
+        a rest one would pose it a second time (the star-pose legs spread twice).
+        """
         if self.rest_skeleton is None:
             return
         if sphere_index < 0 or sphere_index >= len(self.spheres):
             return
         sp = self.spheres[sphere_index]
-        center = sp.get_center()
-        best_parent, best_child = self._closest_bone(center)
+        posed_center = sp.get_center()
+        is_posed = self._is_posed()
+        best_parent, best_child = self._closest_bone(
+            posed_center, skeleton=self.skeleton if is_posed else None
+        )
+        center = posed_center
+        if is_posed and best_parent is not None:
+            center = self.rest_skeleton.transform_point(
+                self.skeleton.get_joint_rotation(best_parent).T
+                @ (posed_center - self.skeleton.joints[best_parent]),
+                best_parent,
+            )
 
         rest_offset = None
         if best_parent is not None:
@@ -1157,6 +1191,15 @@ class SphereManager:
             world_offset = center - rest_joint_pos
             rest_offset = np.dot(R_parent_rest.T, world_offset)
         sp.set_parent_joint(best_parent, rest_offset)
+        # The weights belong to the binding; the next LBS pose derives them for the new one.
+        sp.set_lbs_joint_weights(None)
+        if is_posed and best_parent is not None:
+            # The rigid carry-back above is exact for rigid FK only; in LBS mode this solves
+            # the blend's inverse and stores the weights it used. The secondary fields below
+            # then describe the same rest centre.
+            rest_offset = self._rest_offset_from_posed_center(sphere_index, posed_center)
+            sp.set_parent_joint(best_parent, rest_offset)
+            center = self.rest_skeleton.transform_point(rest_offset, best_parent)
 
         # --- secondary joint = child of the best parent-child segment ---
         # _closest_bone already picked the kintree segment (best_parent -> best_child)
@@ -1217,8 +1260,6 @@ class SphereManager:
         #         secondary_rest_offset = np.dot(R_secondary_rest.T, world_offset_2)
 
         sp.set_secondary_joint(secondary_joint, secondary_rest_offset, lbs_weight)
-        # The weights belong to the binding; the next LBS pose derives them for the new one.
-        sp.set_lbs_joint_weights(None)
 
     def reassign_parent_joints_all(self):
         """Recompute parent joint and rest offset for every sphere."""

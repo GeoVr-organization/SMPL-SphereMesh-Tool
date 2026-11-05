@@ -140,7 +140,8 @@ def main() -> int:
         (shape_picker.slider.minimum(), shape_picker.slider.maximum()) == (0, shape_count),
         f"shape slider spans 0..{shape_count}",
     )
-    check(pose_picker.label.text() == "Pose: none (rest pose)", "pose label at startup", pose_picker.label.text())
+    # The GUI starts in the star pose, which is neither the rest pose of position 0 nor a row.
+    check(pose_picker.label.text() == "Pose: none (edited)", "pose label at startup", pose_picker.label.text())
     check(shape_picker.label.text() == "Shape: none (all betas 0)", "shape label at startup", shape_picker.label.text())
     check(
         pose_picker.slider.hasTracking() and shape_picker.slider.hasTracking(),

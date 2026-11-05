@@ -84,9 +84,14 @@ Any code that adds, removes or changes spheres or connections must keep all of t
     toggle then moves most spheres only as much as the body moves.
   - Crotch spheres can have two weight sets that derive each other, and they still jump
     (measured: up to 19 mm after a posed Fit and a 0.01 beta tick).
-- `assign_parent_joint(i)` picks the closest kintree bone (`_closest_bone`) on
-  `rest_skeleton`, using the sphere's **current** centre. That is only correct at the rest
-  pose.
+- `assign_parent_joint(i)` binds the sphere where it is **shown**.
+  - At the rest pose (`_is_posed()` False) it picks the closest kintree bone
+    (`_closest_bone`) on `rest_skeleton`, as it always did.
+  - Under a pose it picks the closest bone on the posed `skeleton`, carries the centre back
+    to the rest frame through it, and stores `_rest_offset_from_posed_center` (LBS weights
+    included).
+  - Treating a posed centre as a rest one poses it twice. Measured at the star-pose
+    startup: up to 255 mm at the feet.
 - When binding something derived from existing spheres, work in the rest frame, as
   `_bind_divided_sphere` does:
   - Average the endpoints' rest positions.

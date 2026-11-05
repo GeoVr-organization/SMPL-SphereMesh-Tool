@@ -112,7 +112,12 @@ def _(Path):
     sphereMeshPath = "examples/template_male_1.0.txt"
     # The surface it was fitted to, shown from section 5 on.
     #objPath = "examples/SMPL_male.obj"
-    objPath = "examples/SMPL_starpose_NOcrotch.obj"
+    objPath = "examples/SMPL_starpose.obj"
+
+
+    # Save results path 
+    herniaSavePath = "C:\\Users\\Mathias\\Documents\\GitHub\\SMPL-SphereMesh-Tool\\SMFitting\\output\\template_male_1.1.txt"
+
 
     #quick check if the files exist
     if not Path(sphereMeshPath).exists():
@@ -120,7 +125,7 @@ def _(Path):
 
     if not Path(objPath).exists():
         raise FileNotFoundError(f"OBJ file not found at {objPath}")
-    return objPath, sphereMeshPath
+    return herniaSavePath, objPath, sphereMeshPath
 
 
 @app.cell
@@ -1102,20 +1107,16 @@ def _(
 
 @app.cell
 def _(
-    Path,
     SphereMesh,
-    fittedMesh,
     herniaHistory,
     herniaSM,
+    herniaSavePath,
     herniaThreshold,
     meshRotation,
     mo,
     pd,
     sphereMeshConnections,
-    sphereMeshPath,
 ):
-    # Next to the sphere mesh the fit started from, under a new name.
-    herniaSavePath = Path(sphereMeshPath).with_name(f"fitted_{fittedMesh}_hernias.txt")
 
     # The text files hold a sphere mesh in its own frame, before section 4's
     # rotation, so the fit is turned back first: the inverse of a rotation is

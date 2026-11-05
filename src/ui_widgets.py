@@ -26,7 +26,7 @@ from src.smpl_models import (
     GENDERS,
     MALE,
     load_smpl_model,
-    spheremesh_template_path,
+    startup_spheremesh_template_path,
 )
 
 from src.utils import measure_time
@@ -44,6 +44,13 @@ DEFAULT_BETA: tuple[float, ...] = (
     0.0,
     0.0
     )
+# SMPL joint indices of the hips (left_hip sits at +X, the body's left).
+LEFT_HIP_JOINT = 1
+RIGHT_HIP_JOINT = 2
+# Startup pose: each hip turned this much about Z (rad), left +, right -, legs apart. It is the
+# star pose of SMFitting/examples/SMPL_starpose.obj, which the male startup template is fitted
+# to (measured: every OBJ vertex within 0.001 mm of the posed body).
+STAR_POSE_HIP_ABDUCTION = 0.3
 # Slider internal value I represents beta = I/10. Wide range avoids clipping loaded defaults/text betas;
 # +-3.0 covers every row of data/random_shapes.csv.
 BETA_SLIDER_INT_MIN = -30
@@ -196,6 +203,14 @@ def default_beta_tensor() -> tc.Tensor:
     if len(DEFAULT_BETA) != 10:
         raise ValueError("DEFAULT_BETA must have length 10")
     return tc.tensor([float(x) for x in DEFAULT_BETA], dtype=tc.float64)
+
+
+def default_theta_tensor() -> tc.Tensor:
+    """Return the startup pose as a float64 tensor: the star pose, every other joint at 0."""
+    theta = tc.zeros(72, dtype=tc.float64)
+    theta[3 * LEFT_HIP_JOINT + 2] = STAR_POSE_HIP_ABDUCTION
+    theta[3 * RIGHT_HIP_JOINT + 2] = -STAR_POSE_HIP_ABDUCTION
+    return theta
 
 
 class Skeleton:
@@ -872,8 +887,8 @@ class ThetaSliderGroup(QGroupBox):
 
     def __init__(self, parent=None):
         super().__init__("▶ Theta Controls", parent)
-        
-        self.theta = tc.zeros(72, dtype=tc.float64)
+
+        self.theta = default_theta_tensor()
         self.current_joint_idx = 0
         self.current_dimension = 0  # 0=X, 1=Y, 2=Z
         self.random_pose_rows = _load_random_pose_rows()
@@ -881,9 +896,12 @@ class ThetaSliderGroup(QGroupBox):
         self.setCheckable(True)
         self.setChecked(False)
         self.toggled.connect(self._toggle_and_update_arrow)
-        
+
         self._setup_ui()
-        
+        # The star pose is neither the rest pose of position 0 nor a CSV row.
+        if bool((self.theta != 0).any()):
+            self.random_pose_slider.mark_edited()
+
         # Hide all widgets initially since we start collapsed
         self._toggle_visibility(False)
     
@@ -2169,6 +2187,9 @@ class MainWindow(QMainWindow):
         
         # Add theta slider group
         self.theta_slider_group = ThetaSliderGroup()
+        # One tensor from the start, as after the first slider change: the joint slider edits
+        # it in place, so a separate zero copy here would snap the legs shut on the first edit.
+        self.theta = self.theta_slider_group.get_theta()
         self.theta_slider_group.valuesChanged.connect(self._on_theta_changed)
         self.theta_slider_group.lbsBindingToggled.connect(self._on_lbs_binding_toggled)
         self.ui_layout.addWidget(self.theta_slider_group)
@@ -2303,9 +2324,13 @@ class MainWindow(QMainWindow):
             self._position_clip_planes_panel(center_right_container)
         center_right_container.resizeEvent = on_resize
 
-        load_path = spheremesh_template_path(self.gender)
+        load_path = startup_spheremesh_template_path(self.gender)
         try:
-            self.sphere_manager.load_from_json(str(load_path))
+            self._load_spheremesh_file(load_path)
+            # A template saved with rest offsets sits where it was saved, usually the rest
+            # pose; this poses it like the body. A template bound on load (no rest offsets,
+            # the male .txt) stays where the file puts it.
+            self.sphere_manager.update_sphere_positions()
             self.sphere_manager.initialize_radius_scaling_from_mesh(mesh)
             self.sphere_manager.report_lbs_binding_status()
         except (ValueError, OSError, json.JSONDecodeError) as e:
@@ -2720,9 +2745,9 @@ class MainWindow(QMainWindow):
 
     def _load_spheremesh_template_for_gender(self, gender: str):
         """Replace the sphere configuration with the template shipped for *gender*."""
-        template_path = spheremesh_template_path(gender)
+        template_path = startup_spheremesh_template_path(gender)
         try:
-            self.sphere_manager.load_from_json(str(template_path))
+            self._load_spheremesh_file(template_path)
         except (ValueError, OSError, json.JSONDecodeError) as e:
             QMessageBox.warning(
                 self,
@@ -2770,9 +2795,19 @@ class MainWindow(QMainWindow):
         self.sphere_manager.rest_skeleton = None
 
         try:
-            # Template first: update_smplmodel then rebuilds the rest skeleton and runs
-            # FK on the spheres that just came in.
+            # Template first: update_smplmodel then rebuilds the rest skeleton, binds the
+            # spheres that just came in where they are shown and runs FK. A template without
+            # rest offsets (the male .txt) is only right in the pose and shape it was made in,
+            # so it is bound there, and the user's pose and betas come back afterwards.
+            user_theta, user_beta = self.theta, self.beta
+            fit_beta = default_beta_tensor()
+            self.theta, self.beta = default_theta_tensor(), fit_beta
             self._load_spheremesh_template_for_gender(gender)
+            self.update_smplmodel(update_radius=True, update_pose=True)
+            self.theta, self.beta = user_theta, user_beta
+            if not tc.equal(user_beta, fit_beta):
+                # As a beta change: the rest skeleton, and the LBS weights, belong to the betas.
+                self.sphere_manager.rest_skeleton = None
             self.update_smplmodel(update_radius=True, update_pose=True)
             self._post_load_refresh()
         finally:
@@ -2873,9 +2908,10 @@ class MainWindow(QMainWindow):
         )
         if not filepath:
             return None, None
+        return self._json_load_path_for(Path(filepath))
 
-        path = Path(filepath)
-        tmp_path = None
+    def _json_load_path_for(self, path: Path):
+        """(path for sphere_manager loading, temporary file to delete or None) for a .json or .txt."""
         if path.suffix.lower() == ".txt":
             txt2json_mod = self._load_conversion_script("txt2json")
 
@@ -2889,7 +2925,19 @@ class MainWindow(QMainWindow):
                 tmp_path = tmp.name
 
             return tmp_path, tmp_path
-        return filepath, None
+        return str(path), None
+
+    def _load_spheremesh_file(self, path) -> None:
+        """Replace the sphere configuration with a tool .json or an engine .txt file."""
+        load_path, temporary_path = self._json_load_path_for(Path(path))
+        try:
+            self.sphere_manager.load_from_json(load_path)
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.unlink(temporary_path)
+                except OSError:
+                    pass
 
     def _post_load_refresh(self):
         mesh = None

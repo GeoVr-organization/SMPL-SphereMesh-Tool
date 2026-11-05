@@ -142,6 +142,8 @@ def main() -> int:
 
     # ---------------------------------------------------------------------------------
     print("\nRest pose: both modes agree")
+    window.theta_slider_group.reset()   # the GUI starts in the star pose; Reset gives theta 0
+    app.processEvents()
     manager.update_sphere_positions()   # loaded centres are rounded; start from FK
     manager.clear_unsaved_changes()
     bound_indices = bound_sphere_indices(manager)

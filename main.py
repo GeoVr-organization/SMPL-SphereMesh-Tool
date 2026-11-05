@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from src.app_paths import app_root, is_frozen, resource_root, smpl_models_dir, user_data_dir
-from src.smpl_models import MALE, load_smpl_model, smpl_model_path, spheremesh_template_path
+from src.smpl_models import MALE, load_smpl_model, smpl_model_path, startup_spheremesh_template_path
 from src.ui_widgets import MainWindow
 
 _MISSING_MODELS_HINT = (
@@ -31,7 +31,7 @@ def selftest() -> int:
     failures = []
     for label, path in (
         ("male body model", smpl_model_path(MALE)),
-        ("male sphere template", spheremesh_template_path(MALE)),
+        ("male sphere template", startup_spheremesh_template_path(MALE)),
     ):
         ok = path.is_file()
         print(f"  [{'OK ' if ok else 'MISSING'}] {label}: {path}")

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heatmap degli offset beta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&amp;family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Layout: one reading column for the text; the image pairs and the table use the full width. */
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --rule: #c3c2b7;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --rule: #383835; --series-1: #3987e5; --series-2: #d95926;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --rule: #383835; --series-1: #3987e5; --series-2: #d95926;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 16px/1.55 var(--font-body); }
+main { max-width: 1240px; margin: 0 auto; padding: 32px 20px 64px; display: grid; gap: 40px; }
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; margin: 0; }
+h1 { font-size: 2.1rem; line-height: 1.15; }
+h2 { font-size: 1.45rem; padding-bottom: 6px; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1.1rem; }
+p { margin: 0; }
+section { display: grid; gap: 16px; }
+.meta { color: var(--ink-2); font-size: 0.92rem; }
+code { font-size: 0.9em; background: var(--surface); border: 1px solid var(--grid); border-radius: 4px; padding: 0 4px; }
+ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+a { color: var(--series-1); }
+a:focus-visible, button:focus-visible, .hit:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: 999px;
+  border: 1px solid var(--grid); background: var(--surface); font-size: 0.82rem; white-space: nowrap; color: var(--ink); }
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; }
+.chip.good .dot { background: var(--good); }
+.chip.warning .dot { background: var(--warning); }
+.chip.critical .dot { background: var(--critical); }
+.legend-heat { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; font-size: 0.9rem; color: var(--ink-2); }
+.ramp { display: inline-flex; border: 1px solid var(--grid); border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.ramp span { width: 22px; height: 14px; }
+.figure { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 16px; display: grid; gap: 10px; }
+.series-legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 0.9rem; color: var(--ink-2); }
+.series-legend svg { vertical-align: -2px; margin-right: 6px; }
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .band { fill: var(--grid); opacity: 0.55; }
+.chart .band-label, .chart .tick { fill: var(--muted); font: 12px var(--font-body); font-variant-numeric: tabular-nums; }
+.chart .axis-title { fill: var(--ink-2); font: 13px var(--font-body); }
+.chart .mark { stroke: var(--surface); stroke-width: 2; }
+.chart .mark.current { fill: var(--series-1); }
+.chart .mark.corrected { fill: var(--surface); stroke: var(--series-2); }
+.chart .hit { fill: transparent; cursor: default; }
+.tooltip { position: fixed; pointer-events: none; background: var(--ink); color: var(--page); font-size: 0.82rem;
+  padding: 4px 8px; border-radius: 4px; max-width: 320px; display: none; z-index: 5; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: middle; }
+thead th { color: var(--ink-2); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
+thead tr.group th { font-family: var(--font-display); color: var(--ink); border-bottom: 1px solid var(--rule); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tbody th { font-weight: 500; white-space: nowrap; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 20px; }
+.shape { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 14px; display: grid; gap: 10px; align-content: start; }
+.shape header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.shot { padding: 0; border: 1px solid var(--grid); border-radius: 6px; background: #ffffff; cursor: zoom-in; overflow: hidden; }
+.shot img { display: block; width: 100%; height: auto; max-width: 100%; }
+.figures, .betas { font-size: 0.85rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.betas { color: var(--muted); }
+dialog { border: 1px solid var(--rule); border-radius: 8px; padding: 12px; background: var(--surface); color: var(--ink); max-width: min(96vw, 1000px); }
+dialog::backdrop { background: rgb(0 0 0 / 0.6); }
+dialog img { display: block; width: 100%; height: auto; max-height: 82vh; object-fit: contain; background: #ffffff; border-radius: 4px; }
+dialog .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 0.9rem; }
+dialog button { font: inherit; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rule); background: var(--page); color: var(--ink); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+@media (max-width: 420px) { .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<header class="prose" style="display:grid;gap:10px">
+  <h1>Heatmap degli offset beta</h1>
+  <p class="meta">SMPL-SphereMesh-Tool · 2026-11-05 09:39 · template <code>data/template_male_1.1_starpose.txt</code> ·
+  offset <code>data/offsets/beta0..9.csv</code> (fit di SMFitting a β = +1, offset = fit − template)</p>
+  <p>Le immagini vengono dal tool (<code>main.py</code>) in star pose: il template, ogni beta a +1 e a −1, due combinazioni
+  e le dieci forme di <code>data/random_shapes.csv</code>, ciascuna di fronte e da dietro. Le sfere si muovono con gli
+  offset caricati da <em>Load Beta Offsets</em>; il corpo è colorato con <em>Show heatmap</em>.</p>
+</header>
+
+<section class="prose" aria-labelledby="summary-title">
+  <h2 id="summary-title">In breve</h2>
+  <ul>
+    <li><strong>β = +1, un beta alla volta, funziona.</strong> Il tool riproduce i fit: centri entro 0.78 mm
+    da <code>betaN.txt</code> (l'arrotondamento a 3 decimali del caricamento), raggi uguali entro 0.00 mm.
+    Restano 1–3 vertici con d &lt; −10 mm e media |d| di 2.89–3.18 mm,
+    come il template (3 ernie, 3.07 mm).</li>
+    <li><strong>β = −1 no.</strong> 93–108 ernie per ogni beta, min d da −23.1 a −32.1 mm,
+    anche per β5–β9, che muovono il corpo di pochi millimetri. Con le sfere che seguono solo lo scheletro gli stessi
+    casi ne hanno 0–23.</li>
+    <li><strong>Combinazioni.</strong> β0 = +1 con β1 = +1: 40 ernie (min −33.0 mm).
+    β1 = +1 con β2 = −1: 9 (min −11.6 mm).</li>
+    <li><strong>Random shape:</strong> da 1 a 1120 ernie. Il numero segue la somma dei β:
+    con Σβ fra 0 e 1 nessuna forma supera 9 ernie; lontano da lì arrivano a 1120
+    (Random shape 2, Σβ = −6.40).</li>
+    <li><strong>Causa misurata.</strong> Tutti gli offset hanno una parte comune, la deriva della procedura di fit: fino a
+    58.7 mm sulle sfere di bacino e cosce (s27, s23, s51, s50, s54). Il tool la somma Σβ volte. Con Σβ = 1
+    torna il fit, con Σβ = 0 si annulla; altrove sposta le sfere fuori dalla pelle. Tolta una stima grezza di questa parte,
+    i casi a −1 scendono a 4–8 ernie e Random shape 2 da
+    1120 a 136.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="read-title">
+  <h2 id="read-title" class="prose">Come leggere le immagini</h2>
+  <div class="prose" style="display:grid;gap:10px">
+    <p>Il colore è <em>d</em>, la distanza con segno di ogni vertice del corpo dalla sphere mesh, in bande da 5 mm.
+    Negativo vuol dire che il vertice è dentro le sfere, cioè una sfera esce dalla pelle; sotto −10 mm lo contiamo come
+    <em>ernia</em>, la stessa soglia del ciclo delle ernie in SMFitting. Positivo vuol dire che la sfera non arriva alla pelle.</p>
+    <div class="legend-heat">
+      <span><span class="ramp"><span style="background:#0d2a85"></span><span style="background:#1f5fd0"></span><span style="background:#2fa4e7"></span><span style="background:#8ee8f2"></span></span> −20 … 0 mm: sfera fuori dalla pelle</span>
+      <span><span class="ramp"><span style="background:#ffe45c"></span><span style="background:#ffa63d"></span><span style="background:#e8492e"></span><span style="background:#8c1010"></span></span> 0 … +20 mm: sfera sotto la pelle</span>
+      <span><span class="ramp"><span style="background:#4a4a4a"></span></span> oltre +20 mm</span>
+    </div>
+    <p>Viso, mani e piedi restano grigi: il template non li copre. Le statistiche usano solo i
+    3823 vertici di <code>SMPL_starpose.obj</code>, la superficie su cui sono stati fatti i fit
+    (su 6890 del corpo). Clicca un'immagine per ingrandirla.</p>
+  </div>
+</section>
+
+<section aria-labelledby="chart-heading">
+  <h2 id="chart-heading" class="prose">Ernie e somma dei β</h2>
+  <div class="figure">
+    <div class="series-legend" aria-hidden="true">
+      <span><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="var(--series-1)"/></svg>offset attuali (nel tool)</span>
+      <span><svg width="14" height="14"><circle cx="7" cy="7" r="4.5" fill="var(--surface)" stroke="var(--series-2)" stroke-width="2"/></svg>offset meno la parte comune (stima, fuori dal tool)</span>
+    </div>
+    <svg class="chart" viewBox="0 0 760 360" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">Ernie contro somma dei β</title>
+<desc id="chart-desc">Per ogni forma, il numero di vertici con d sotto −10 mm, con gli offset attuali e con la parte comune tolta. I valori sono anche nella tabella sotto.</desc>
+<rect class="band" x="430.2" y="20" width="52.3" height="280"/>
+<text class="band-label" x="488.5" y="34">Σβ tra 0 e 1</text>
+<line class="grid" x1="64" x2="744" y1="300.0" y2="300.0"/>
+<text class="tick" x="56" y="304.0" text-anchor="end">1</text>
+<line class="grid" x1="64" x2="744" y1="215.2" y2="215.2"/>
+<text class="tick" x="56" y="219.2" text-anchor="end">10</text>
+<line class="grid" x1="64" x2="744" y1="130.4" y2="130.4"/>
+<text class="tick" x="56" y="134.4" text-anchor="end">100</text>
+<line class="grid" x1="64" x2="744" y1="45.5" y2="45.5"/>
+<text class="tick" x="56" y="49.5" text-anchor="end">1000</text>
+<text class="tick" x="64.0" y="318" text-anchor="middle">−7</text>
+<text class="tick" x="116.3" y="318" text-anchor="middle">−6</text>
+<text class="tick" x="168.6" y="318" text-anchor="middle">−5</text>
+<text class="tick" x="220.9" y="318" text-anchor="middle">−4</text>
+<text class="tick" x="273.2" y="318" text-anchor="middle">−3</text>
+<text class="tick" x="325.5" y="318" text-anchor="middle">−2</text>
+<text class="tick" x="377.8" y="318" text-anchor="middle">−1</text>
+<text class="tick" x="430.2" y="318" text-anchor="middle">0</text>
+<text class="tick" x="482.5" y="318" text-anchor="middle">+1</text>
+<text class="tick" x="534.8" y="318" text-anchor="middle">+2</text>
+<text class="tick" x="587.1" y="318" text-anchor="middle">+3</text>
+<text class="tick" x="639.4" y="318" text-anchor="middle">+4</text>
+<text class="tick" x="691.7" y="318" text-anchor="middle">+5</text>
+<text class="tick" x="744.0" y="318" text-anchor="middle">+6</text>
+<line class="axis" x1="64" x2="744" y1="300" y2="300"/>
+<text class="axis-title" x="404" y="344" text-anchor="middle">somma dei β (Σβ)</text>
+<text class="axis-title" transform="translate(16 160) rotate(-90)" text-anchor="middle">vertici con d &lt; −10 mm (scala log)</text>
+<circle class="mark corrected" cx="430.2" cy="259.5" r="5"/>
+<circle class="mark current" cx="430.2" cy="259.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="228.3" r="5"/>
+<circle class="mark current" cx="482.5" cy="274.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="248.9" r="5"/>
+<circle class="mark current" cx="482.5" cy="300.0" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="248.9" r="5"/>
+<circle class="mark current" cx="482.5" cy="274.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="234.0" r="5"/>
+<circle class="mark current" cx="482.5" cy="300.0" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="240.7" r="5"/>
+<circle class="mark current" cx="482.5" cy="274.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="248.9" r="5"/>
+<circle class="mark current" cx="482.5" cy="300.0" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="259.5" r="5"/>
+<circle class="mark current" cx="482.5" cy="300.0" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="259.5" r="5"/>
+<circle class="mark current" cx="482.5" cy="259.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="300.0" r="5"/>
+<circle class="mark current" cx="482.5" cy="259.5" r="5"/>
+<circle class="mark corrected" cx="482.5" cy="259.5" r="5"/>
+<circle class="mark current" cx="482.5" cy="274.5" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="234.0" r="5"/>
+<circle class="mark current" cx="377.8" cy="131.9" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="223.4" r="5"/>
+<circle class="mark current" cx="377.8" cy="127.5" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="240.7" r="5"/>
+<circle class="mark current" cx="377.8" cy="133.0" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="234.0" r="5"/>
+<circle class="mark current" cx="377.8" cy="133.0" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="228.3" r="5"/>
+<circle class="mark current" cx="377.8" cy="131.9" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="234.0" r="5"/>
+<circle class="mark current" cx="377.8" cy="131.1" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="240.7" r="5"/>
+<circle class="mark current" cx="377.8" cy="131.9" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="234.0" r="5"/>
+<circle class="mark current" cx="377.8" cy="130.7" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="228.3" r="5"/>
+<circle class="mark current" cx="377.8" cy="128.9" r="5"/>
+<circle class="mark corrected" cx="377.8" cy="248.9" r="5"/>
+<circle class="mark current" cx="377.8" cy="130.0" r="5"/>
+<circle class="mark corrected" cx="534.8" cy="219.1" r="5"/>
+<circle class="mark current" cx="534.8" cy="164.1" r="5"/>
+<circle class="mark corrected" cx="430.2" cy="219.1" r="5"/>
+<circle class="mark current" cx="430.2" cy="219.1" r="5"/>
+<circle class="mark corrected" cx="126.8" cy="109.7" r="5"/>
+<circle class="mark current" cx="126.8" cy="44.4" r="5"/>
+<circle class="mark corrected" cx="95.4" cy="119.0" r="5"/>
+<circle class="mark current" cx="95.4" cy="41.4" r="5"/>
+<circle class="mark corrected" cx="618.5" cy="205.5" r="5"/>
+<circle class="mark current" cx="618.5" cy="88.4" r="5"/>
+<circle class="mark corrected" cx="193.2" cy="142.5" r="5"/>
+<circle class="mark current" cx="193.2" cy="53.2" r="5"/>
+<circle class="mark corrected" cx="483.5" cy="223.4" r="5"/>
+<circle class="mark current" cx="483.5" cy="300.0" r="5"/>
+<circle class="mark corrected" cx="579.2" cy="191.5" r="5"/>
+<circle class="mark current" cx="579.2" cy="133.0" r="5"/>
+<circle class="mark corrected" cx="577.7" cy="223.4" r="5"/>
+<circle class="mark current" cx="577.7" cy="141.0" r="5"/>
+<circle class="mark corrected" cx="700.1" cy="158.2" r="5"/>
+<circle class="mark current" cx="700.1" cy="75.8" r="5"/>
+<circle class="mark corrected" cx="542.6" cy="215.2" r="5"/>
+<circle class="mark current" cx="542.6" cy="148.0" r="5"/>
+<circle class="mark corrected" cx="458.9" cy="219.1" r="5"/>
+<circle class="mark current" cx="458.9" cy="234.0" r="5"/>
+<circle class="hit" cx="430.2" cy="259.5" r="12" tabindex="0" data-tip="Template (tutti i beta a 0) · Σβ +0.00 · offset attuali: 3 ernie"><title>Template (tutti i beta a 0) · Σβ +0.00 · offset attuali: 3 ernie</title></circle>
+<circle class="hit" cx="430.2" cy="259.5" r="12" tabindex="0" data-tip="Template (tutti i beta a 0) · Σβ +0.00 · senza parte comune: 3 ernie"><title>Template (tutti i beta a 0) · Σβ +0.00 · senza parte comune: 3 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="274.5" r="12" tabindex="0" data-tip="β0 = +1 · Σβ +1.00 · offset attuali: 2 ernie"><title>β0 = +1 · Σβ +1.00 · offset attuali: 2 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="228.3" r="12" tabindex="0" data-tip="β0 = +1 · Σβ +1.00 · senza parte comune: 7 ernie"><title>β0 = +1 · Σβ +1.00 · senza parte comune: 7 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="300.0" r="12" tabindex="0" data-tip="β1 = +1 · Σβ +1.00 · offset attuali: 1 ernie"><title>β1 = +1 · Σβ +1.00 · offset attuali: 1 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="248.9" r="12" tabindex="0" data-tip="β1 = +1 · Σβ +1.00 · senza parte comune: 4 ernie"><title>β1 = +1 · Σβ +1.00 · senza parte comune: 4 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="274.5" r="12" tabindex="0" data-tip="β2 = +1 · Σβ +1.00 · offset attuali: 2 ernie"><title>β2 = +1 · Σβ +1.00 · offset attuali: 2 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="248.9" r="12" tabindex="0" data-tip="β2 = +1 · Σβ +1.00 · senza parte comune: 4 ernie"><title>β2 = +1 · Σβ +1.00 · senza parte comune: 4 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="300.0" r="12" tabindex="0" data-tip="β3 = +1 · Σβ +1.00 · offset attuali: 1 ernie"><title>β3 = +1 · Σβ +1.00 · offset attuali: 1 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="234.0" r="12" tabindex="0" data-tip="β3 = +1 · Σβ +1.00 · senza parte comune: 6 ernie"><title>β3 = +1 · Σβ +1.00 · senza parte comune: 6 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="274.5" r="12" tabindex="0" data-tip="β4 = +1 · Σβ +1.00 · offset attuali: 2 ernie"><title>β4 = +1 · Σβ +1.00 · offset attuali: 2 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="240.7" r="12" tabindex="0" data-tip="β4 = +1 · Σβ +1.00 · senza parte comune: 5 ernie"><title>β4 = +1 · Σβ +1.00 · senza parte comune: 5 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="300.0" r="12" tabindex="0" data-tip="β5 = +1 · Σβ +1.00 · offset attuali: 1 ernie"><title>β5 = +1 · Σβ +1.00 · offset attuali: 1 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="248.9" r="12" tabindex="0" data-tip="β5 = +1 · Σβ +1.00 · senza parte comune: 4 ernie"><title>β5 = +1 · Σβ +1.00 · senza parte comune: 4 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="300.0" r="12" tabindex="0" data-tip="β6 = +1 · Σβ +1.00 · offset attuali: 1 ernie"><title>β6 = +1 · Σβ +1.00 · offset attuali: 1 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="259.5" r="12" tabindex="0" data-tip="β6 = +1 · Σβ +1.00 · senza parte comune: 3 ernie"><title>β6 = +1 · Σβ +1.00 · senza parte comune: 3 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="259.5" r="12" tabindex="0" data-tip="β7 = +1 · Σβ +1.00 · offset attuali: 3 ernie"><title>β7 = +1 · Σβ +1.00 · offset attuali: 3 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="259.5" r="12" tabindex="0" data-tip="β7 = +1 · Σβ +1.00 · senza parte comune: 3 ernie"><title>β7 = +1 · Σβ +1.00 · senza parte comune: 3 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="259.5" r="12" tabindex="0" data-tip="β8 = +1 · Σβ +1.00 · offset attuali: 3 ernie"><title>β8 = +1 · Σβ +1.00 · offset attuali: 3 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="300.0" r="12" tabindex="0" data-tip="β8 = +1 · Σβ +1.00 · senza parte comune: 1 ernie"><title>β8 = +1 · Σβ +1.00 · senza parte comune: 1 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="274.5" r="12" tabindex="0" data-tip="β9 = +1 · Σβ +1.00 · offset attuali: 2 ernie"><title>β9 = +1 · Σβ +1.00 · offset attuali: 2 ernie</title></circle>
+<circle class="hit" cx="482.5" cy="259.5" r="12" tabindex="0" data-tip="β9 = +1 · Σβ +1.00 · senza parte comune: 3 ernie"><title>β9 = +1 · Σβ +1.00 · senza parte comune: 3 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="131.9" r="12" tabindex="0" data-tip="β0 = -1 · Σβ −1.00 · offset attuali: 96 ernie"><title>β0 = -1 · Σβ −1.00 · offset attuali: 96 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="234.0" r="12" tabindex="0" data-tip="β0 = -1 · Σβ −1.00 · senza parte comune: 6 ernie"><title>β0 = -1 · Σβ −1.00 · senza parte comune: 6 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="127.5" r="12" tabindex="0" data-tip="β1 = -1 · Σβ −1.00 · offset attuali: 108 ernie"><title>β1 = -1 · Σβ −1.00 · offset attuali: 108 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="223.4" r="12" tabindex="0" data-tip="β1 = -1 · Σβ −1.00 · senza parte comune: 8 ernie"><title>β1 = -1 · Σβ −1.00 · senza parte comune: 8 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="133.0" r="12" tabindex="0" data-tip="β2 = -1 · Σβ −1.00 · offset attuali: 93 ernie"><title>β2 = -1 · Σβ −1.00 · offset attuali: 93 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="240.7" r="12" tabindex="0" data-tip="β2 = -1 · Σβ −1.00 · senza parte comune: 5 ernie"><title>β2 = -1 · Σβ −1.00 · senza parte comune: 5 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="133.0" r="12" tabindex="0" data-tip="β3 = -1 · Σβ −1.00 · offset attuali: 93 ernie"><title>β3 = -1 · Σβ −1.00 · offset attuali: 93 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="234.0" r="12" tabindex="0" data-tip="β3 = -1 · Σβ −1.00 · senza parte comune: 6 ernie"><title>β3 = -1 · Σβ −1.00 · senza parte comune: 6 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="131.9" r="12" tabindex="0" data-tip="β4 = -1 · Σβ −1.00 · offset attuali: 96 ernie"><title>β4 = -1 · Σβ −1.00 · offset attuali: 96 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="228.3" r="12" tabindex="0" data-tip="β4 = -1 · Σβ −1.00 · senza parte comune: 7 ernie"><title>β4 = -1 · Σβ −1.00 · senza parte comune: 7 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="131.1" r="12" tabindex="0" data-tip="β5 = -1 · Σβ −1.00 · offset attuali: 98 ernie"><title>β5 = -1 · Σβ −1.00 · offset attuali: 98 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="234.0" r="12" tabindex="0" data-tip="β5 = -1 · Σβ −1.00 · senza parte comune: 6 ernie"><title>β5 = -1 · Σβ −1.00 · senza parte comune: 6 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="131.9" r="12" tabindex="0" data-tip="β6 = -1 · Σβ −1.00 · offset attuali: 96 ernie"><title>β6 = -1 · Σβ −1.00 · offset attuali: 96 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="240.7" r="12" tabindex="0" data-tip="β6 = -1 · Σβ −1.00 · senza parte comune: 5 ernie"><title>β6 = -1 · Σβ −1.00 · senza parte comune: 5 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="130.7" r="12" tabindex="0" data-tip="β7 = -1 · Σβ −1.00 · offset attuali: 99 ernie"><title>β7 = -1 · Σβ −1.00 · offset attuali: 99 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="234.0" r="12" tabindex="0" data-tip="β7 = -1 · Σβ −1.00 · senza parte comune: 6 ernie"><title>β7 = -1 · Σβ −1.00 · senza parte comune: 6 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="128.9" r="12" tabindex="0" data-tip="β8 = -1 · Σβ −1.00 · offset attuali: 104 ernie"><title>β8 = -1 · Σβ −1.00 · offset attuali: 104 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="228.3" r="12" tabindex="0" data-tip="β8 = -1 · Σβ −1.00 · senza parte comune: 7 ernie"><title>β8 = -1 · Σβ −1.00 · senza parte comune: 7 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="130.0" r="12" tabindex="0" data-tip="β9 = -1 · Σβ −1.00 · offset attuali: 101 ernie"><title>β9 = -1 · Σβ −1.00 · offset attuali: 101 ernie</title></circle>
+<circle class="hit" cx="377.8" cy="248.9" r="12" tabindex="0" data-tip="β9 = -1 · Σβ −1.00 · senza parte comune: 4 ernie"><title>β9 = -1 · Σβ −1.00 · senza parte comune: 4 ernie</title></circle>
+<circle class="hit" cx="534.8" cy="164.1" r="12" tabindex="0" data-tip="β0 = +1, β1 = +1 · Σβ +2.00 · offset attuali: 40 ernie"><title>β0 = +1, β1 = +1 · Σβ +2.00 · offset attuali: 40 ernie</title></circle>
+<circle class="hit" cx="534.8" cy="219.1" r="12" tabindex="0" data-tip="β0 = +1, β1 = +1 · Σβ +2.00 · senza parte comune: 9 ernie"><title>β0 = +1, β1 = +1 · Σβ +2.00 · senza parte comune: 9 ernie</title></circle>
+<circle class="hit" cx="430.2" cy="219.1" r="12" tabindex="0" data-tip="β1 = +1, β2 = −1 · Σβ +0.00 · offset attuali: 9 ernie"><title>β1 = +1, β2 = −1 · Σβ +0.00 · offset attuali: 9 ernie</title></circle>
+<circle class="hit" cx="430.2" cy="219.1" r="12" tabindex="0" data-tip="β1 = +1, β2 = −1 · Σβ +0.00 · senza parte comune: 9 ernie"><title>β1 = +1, β2 = −1 · Σβ +0.00 · senza parte comune: 9 ernie</title></circle>
+<circle class="hit" cx="126.8" cy="44.4" r="12" tabindex="0" data-tip="Random shape 1 · Σβ −5.80 · offset attuali: 1030 ernie"><title>Random shape 1 · Σβ −5.80 · offset attuali: 1030 ernie</title></circle>
+<circle class="hit" cx="126.8" cy="109.7" r="12" tabindex="0" data-tip="Random shape 1 · Σβ −5.80 · senza parte comune: 175 ernie"><title>Random shape 1 · Σβ −5.80 · senza parte comune: 175 ernie</title></circle>
+<circle class="hit" cx="95.4" cy="41.4" r="12" tabindex="0" data-tip="Random shape 2 · Σβ −6.40 · offset attuali: 1120 ernie"><title>Random shape 2 · Σβ −6.40 · offset attuali: 1120 ernie</title></circle>
+<circle class="hit" cx="95.4" cy="119.0" r="12" tabindex="0" data-tip="Random shape 2 · Σβ −6.40 · senza parte comune: 136 ernie"><title>Random shape 2 · Σβ −6.40 · senza parte comune: 136 ernie</title></circle>
+<circle class="hit" cx="618.5" cy="88.4" r="12" tabindex="0" data-tip="Random shape 3 · Σβ +3.60 · offset attuali: 312 ernie"><title>Random shape 3 · Σβ +3.60 · offset attuali: 312 ernie</title></circle>
+<circle class="hit" cx="618.5" cy="205.5" r="12" tabindex="0" data-tip="Random shape 3 · Σβ +3.60 · senza parte comune: 13 ernie"><title>Random shape 3 · Σβ +3.60 · senza parte comune: 13 ernie</title></circle>
+<circle class="hit" cx="193.2" cy="53.2" r="12" tabindex="0" data-tip="Random shape 4 · Σβ −4.53 · offset attuali: 813 ernie"><title>Random shape 4 · Σβ −4.53 · offset attuali: 813 ernie</title></circle>
+<circle class="hit" cx="193.2" cy="142.5" r="12" tabindex="0" data-tip="Random shape 4 · Σβ −4.53 · senza parte comune: 72 ernie"><title>Random shape 4 · Σβ −4.53 · senza parte comune: 72 ernie</title></circle>
+<circle class="hit" cx="483.5" cy="300.0" r="12" tabindex="0" data-tip="Random shape 5 · Σβ +1.02 · offset attuali: 1 ernie"><title>Random shape 5 · Σβ +1.02 · offset attuali: 1 ernie</title></circle>
+<circle class="hit" cx="483.5" cy="223.4" r="12" tabindex="0" data-tip="Random shape 5 · Σβ +1.02 · senza parte comune: 8 ernie"><title>Random shape 5 · Σβ +1.02 · senza parte comune: 8 ernie</title></circle>
+<circle class="hit" cx="579.2" cy="133.0" r="12" tabindex="0" data-tip="Random shape 6 · Σβ +2.85 · offset attuali: 93 ernie"><title>Random shape 6 · Σβ +2.85 · offset attuali: 93 ernie</title></circle>
+<circle class="hit" cx="579.2" cy="191.5" r="12" tabindex="0" data-tip="Random shape 6 · Σβ +2.85 · senza parte comune: 19 ernie"><title>Random shape 6 · Σβ +2.85 · senza parte comune: 19 ernie</title></circle>
+<circle class="hit" cx="577.7" cy="141.0" r="12" tabindex="0" data-tip="Random shape 7 · Σβ +2.82 · offset attuali: 75 ernie"><title>Random shape 7 · Σβ +2.82 · offset attuali: 75 ernie</title></circle>
+<circle class="hit" cx="577.7" cy="223.4" r="12" tabindex="0" data-tip="Random shape 7 · Σβ +2.82 · senza parte comune: 8 ernie"><title>Random shape 7 · Σβ +2.82 · senza parte comune: 8 ernie</title></circle>
+<circle class="hit" cx="700.1" cy="75.8" r="12" tabindex="0" data-tip="Random shape 8 · Σβ +5.16 · offset attuali: 440 ernie"><title>Random shape 8 · Σβ +5.16 · offset attuali: 440 ernie</title></circle>
+<circle class="hit" cx="700.1" cy="158.2" r="12" tabindex="0" data-tip="Random shape 8 · Σβ +5.16 · senza parte comune: 47 ernie"><title>Random shape 8 · Σβ +5.16 · senza parte comune: 47 ernie</title></circle>
+<circle class="hit" cx="542.6" cy="148.0" r="12" tabindex="0" data-tip="Random shape 9 · Σβ +2.15 · offset attuali: 62 ernie"><title>Random shape 9 · Σβ +2.15 · offset attuali: 62 ernie</title></circle>
+<circle class="hit" cx="542.6" cy="215.2" r="12" tabindex="0" data-tip="Random shape 9 · Σβ +2.15 · senza parte comune: 10 ernie"><title>Random shape 9 · Σβ +2.15 · senza parte comune: 10 ernie</title></circle>
+<circle class="hit" cx="458.9" cy="234.0" r="12" tabindex="0" data-tip="Random shape 10 · Σβ +0.55 · offset attuali: 6 ernie"><title>Random shape 10 · Σβ +0.55 · offset attuali: 6 ernie</title></circle>
+<circle class="hit" cx="458.9" cy="219.1" r="12" tabindex="0" data-tip="Random shape 10 · Σβ +0.55 · senza parte comune: 9 ernie"><title>Random shape 10 · Σβ +0.55 · senza parte comune: 9 ernie</title></circle>
+</svg>
+    <p class="meta">Un punto per forma e per serie; i dieci casi a +1 e i dieci a −1 cadono sulla stessa verticale.
+    Passa sopra un punto, o raggiungilo con Tab, per leggerne i valori; sono tutti anche nella tabella.</p>
+  </div>
+</section>
+
+<section aria-labelledby="table-heading">
+  <h2 id="table-heading" class="prose">Tutte le forme</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr class="group"><th></th><th></th><th colspan="4">Con gli offset (immagini)</th><th colspan="2">Solo scheletro</th><th>Senza parte comune</th></tr>
+        <tr><th scope="col">Forma</th><th scope="col" class="num">Σβ</th><th scope="col">d &lt; −10 mm</th><th scope="col" class="num">min d [mm]</th>
+        <th scope="col" class="num">media |d| [mm]</th><th scope="col" class="num">d &gt; +10 mm</th><th scope="col" class="num">d &lt; −10 mm</th>
+        <th scope="col" class="num">d &gt; +10 mm</th><th scope="col" class="num">d &lt; −10 mm</th></tr>
+      </thead>
+      <tbody>
+<tr><th scope="row"><a href="#template">Template (tutti i beta a 0)</a></th><td class="num">+0.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></td><td class="num">−10.5</td><td class="num">3.07</td><td class="num">157</td><td class="num">7</td><td class="num">150</td><td class="num">3</td></tr>
+<tr><th scope="row"><a href="#beta0_p1">β0 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></td><td class="num">−10.3</td><td class="num">2.95</td><td class="num">149</td><td class="num">228</td><td class="num">80</td><td class="num">7</td></tr>
+<tr><th scope="row"><a href="#beta1_p1">β1 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></td><td class="num">−10.3</td><td class="num">3.18</td><td class="num">162</td><td class="num">742</td><td class="num">103</td><td class="num">4</td></tr>
+<tr><th scope="row"><a href="#beta2_p1">β2 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></td><td class="num">−10.2</td><td class="num">2.93</td><td class="num">150</td><td class="num">4</td><td class="num">176</td><td class="num">4</td></tr>
+<tr><th scope="row"><a href="#beta3_p1">β3 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></td><td class="num">−10.3</td><td class="num">3.08</td><td class="num">166</td><td class="num">13</td><td class="num">149</td><td class="num">6</td></tr>
+<tr><th scope="row"><a href="#beta4_p1">β4 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></td><td class="num">−10.5</td><td class="num">2.98</td><td class="num">159</td><td class="num">4</td><td class="num">159</td><td class="num">5</td></tr>
+<tr><th scope="row"><a href="#beta5_p1">β5 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></td><td class="num">−10.2</td><td class="num">3.06</td><td class="num">164</td><td class="num">8</td><td class="num">206</td><td class="num">4</td></tr>
+<tr><th scope="row"><a href="#beta6_p1">β6 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></td><td class="num">−10.3</td><td class="num">2.89</td><td class="num">148</td><td class="num">17</td><td class="num">156</td><td class="num">3</td></tr>
+<tr><th scope="row"><a href="#beta7_p1">β7 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></td><td class="num">−10.4</td><td class="num">2.96</td><td class="num">149</td><td class="num">6</td><td class="num">153</td><td class="num">3</td></tr>
+<tr><th scope="row"><a href="#beta8_p1">β8 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></td><td class="num">−10.5</td><td class="num">2.95</td><td class="num">147</td><td class="num">9</td><td class="num">145</td><td class="num">1</td></tr>
+<tr><th scope="row"><a href="#beta9_p1">β9 = +1</a></th><td class="num">+1.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></td><td class="num">−10.2</td><td class="num">3.03</td><td class="num">157</td><td class="num">15</td><td class="num">130</td><td class="num">3</td></tr>
+<tr><th scope="row"><a href="#beta0_m1">β0 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></td><td class="num">−27.8</td><td class="num">3.69</td><td class="num">191</td><td class="num">0</td><td class="num">655</td><td class="num">6</td></tr>
+<tr><th scope="row"><a href="#beta1_m1">β1 = -1</a></th><td class="num">−1.00</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 108 ernie</span></td><td class="num">−32.1</td><td class="num">3.63</td><td class="num">176</td><td class="num">3</td><td class="num">1093</td><td class="num">8</td></tr>
+<tr><th scope="row"><a href="#beta2_m1">β2 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></td><td class="num">−23.1</td><td class="num">3.66</td><td class="num">184</td><td class="num">19</td><td class="num">145</td><td class="num">5</td></tr>
+<tr><th scope="row"><a href="#beta3_m1">β3 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></td><td class="num">−25.0</td><td class="num">3.56</td><td class="num">175</td><td class="num">7</td><td class="num">163</td><td class="num">6</td></tr>
+<tr><th scope="row"><a href="#beta4_m1">β4 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></td><td class="num">−25.6</td><td class="num">3.65</td><td class="num">180</td><td class="num">15</td><td class="num">147</td><td class="num">7</td></tr>
+<tr><th scope="row"><a href="#beta5_m1">β5 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 98 ernie</span></td><td class="num">−23.3</td><td class="num">3.59</td><td class="num">169</td><td class="num">23</td><td class="num">123</td><td class="num">6</td></tr>
+<tr><th scope="row"><a href="#beta6_m1">β6 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></td><td class="num">−27.4</td><td class="num">3.75</td><td class="num">189</td><td class="num">16</td><td class="num">175</td><td class="num">5</td></tr>
+<tr><th scope="row"><a href="#beta7_m1">β7 = -1</a></th><td class="num">−1.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 99 ernie</span></td><td class="num">−25.9</td><td class="num">3.67</td><td class="num">184</td><td class="num">9</td><td class="num">149</td><td class="num">6</td></tr>
+<tr><th scope="row"><a href="#beta8_m1">β8 = -1</a></th><td class="num">−1.00</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 104 ernie</span></td><td class="num">−25.4</td><td class="num">3.66</td><td class="num">182</td><td class="num">8</td><td class="num">158</td><td class="num">7</td></tr>
+<tr><th scope="row"><a href="#beta9_m1">β9 = -1</a></th><td class="num">−1.00</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 101 ernie</span></td><td class="num">−25.1</td><td class="num">3.61</td><td class="num">178</td><td class="num">7</td><td class="num">181</td><td class="num">4</td></tr>
+<tr><th scope="row"><a href="#combo_b0p1_b1p1">β0 = +1, β1 = +1</a></th><td class="num">+2.00</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 40 ernie</span></td><td class="num">−33.0</td><td class="num">3.50</td><td class="num">184</td><td class="num">1393</td><td class="num">58</td><td class="num">9</td></tr>
+<tr><th scope="row"><a href="#combo_b1p1_b2m1">β1 = +1, β2 = −1</a></th><td class="num">+0.00</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 9 ernie</span></td><td class="num">−11.6</td><td class="num">3.33</td><td class="num">181</td><td class="num">861</td><td class="num">101</td><td class="num">9</td></tr>
+<tr><th scope="row"><a href="#random01">Random shape 1</a></th><td class="num">−5.80</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 1030 ernie</span></td><td class="num">−166.0</td><td class="num">12.09</td><td class="num">173</td><td class="num">10</td><td class="num">2387</td><td class="num">175</td></tr>
+<tr><th scope="row"><a href="#random02">Random shape 2</a></th><td class="num">−6.40</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 1120 ernie</span></td><td class="num">−160.6</td><td class="num">14.15</td><td class="num">238</td><td class="num">2</td><td class="num">1061</td><td class="num">136</td></tr>
+<tr><th scope="row"><a href="#random03">Random shape 3</a></th><td class="num">+3.60</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 312 ernie</span></td><td class="num">−119.9</td><td class="num">6.60</td><td class="num">271</td><td class="num">14</td><td class="num">366</td><td class="num">13</td></tr>
+<tr><th scope="row"><a href="#random04">Random shape 4</a></th><td class="num">−4.53</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 813 ernie</span></td><td class="num">−136.0</td><td class="num">9.57</td><td class="num">208</td><td class="num">204</td><td class="num">168</td><td class="num">72</td></tr>
+<tr><th scope="row"><a href="#random05">Random shape 5</a></th><td class="num">+1.02</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></td><td class="num">−10.1</td><td class="num">2.96</td><td class="num">161</td><td class="num">12</td><td class="num">180</td><td class="num">8</td></tr>
+<tr><th scope="row"><a href="#random06">Random shape 6</a></th><td class="num">+2.85</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></td><td class="num">−65.5</td><td class="num">4.18</td><td class="num">244</td><td class="num">7</td><td class="num">738</td><td class="num">19</td></tr>
+<tr><th scope="row"><a href="#random07">Random shape 7</a></th><td class="num">+2.82</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 75 ernie</span></td><td class="num">−45.7</td><td class="num">4.01</td><td class="num">243</td><td class="num">1179</td><td class="num">49</td><td class="num">8</td></tr>
+<tr><th scope="row"><a href="#random08">Random shape 8</a></th><td class="num">+5.16</td><td><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 440 ernie</span></td><td class="num">−150.3</td><td class="num">9.14</td><td class="num">385</td><td class="num">0</td><td class="num">1475</td><td class="num">47</td></tr>
+<tr><th scope="row"><a href="#random09">Random shape 9</a></th><td class="num">+2.15</td><td><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 62 ernie</span></td><td class="num">−49.6</td><td class="num">3.79</td><td class="num">230</td><td class="num">0</td><td class="num">1704</td><td class="num">10</td></tr>
+<tr><th scope="row"><a href="#random10">Random shape 10</a></th><td class="num">+0.55</td><td><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 6 ernie</span></td><td class="num">−11.8</td><td class="num">3.18</td><td class="num">179</td><td class="num">0</td><td class="num">1815</td><td class="num">9</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="meta prose">Conteggi sui 3823 vertici della superficie dei fit. <em>Solo scheletro</em>: stessi beta
+  con gli offset scaricati, le sfere seguono le articolazioni (LBS). <em>Senza parte comune</em>: ogni offset meno la media
+  degli offset di β5–β9, calcolato fuori dal tool come diagnosi.</p>
+</section>
+
+<section aria-labelledby="template-heading">
+  <h2 id="template-heading" class="prose">Template</h2>
+  <div class="gallery"><article class="shape" id="template"><header><h3>Template (tutti i beta a 0)</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/template_front.png" data-caption="Heatmap, Template (tutti i beta a 0), vista da fronte"><img src="images/template_front.png" alt="Heatmap, Template (tutti i beta a 0), vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/template_back.png" data-caption="Heatmap, Template (tutti i beta a 0), vista da retro"><img src="images/template_back.png" alt="Heatmap, Template (tutti i beta a 0), vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.5 mm · media |d| 3.07 mm · solo scheletro: 7 ernie, 150 corte</p></article></div>
+</section>
+
+<section aria-labelledby="plus-heading">
+  <h2 id="plus-heading" class="prose">Un beta a +1</h2>
+  <p class="prose">Le forme su cui sono stati fatti i fit: qui gli offset devono restituire esattamente <code>betaN.txt</code>.</p>
+  <div class="gallery"><article class="shape" id="beta0_p1"><header><h3>β0 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta0_p1_front.png" data-caption="Heatmap, β0 = +1, vista da fronte"><img src="images/beta0_p1_front.png" alt="Heatmap, β0 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta0_p1_back.png" data-caption="Heatmap, β0 = +1, vista da retro"><img src="images/beta0_p1_back.png" alt="Heatmap, β0 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.3 mm · media |d| 2.95 mm · centri entro 0.78 mm da beta0.txt · solo scheletro: 228 ernie, 80 corte</p></article><article class="shape" id="beta1_p1"><header><h3>β1 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta1_p1_front.png" data-caption="Heatmap, β1 = +1, vista da fronte"><img src="images/beta1_p1_front.png" alt="Heatmap, β1 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta1_p1_back.png" data-caption="Heatmap, β1 = +1, vista da retro"><img src="images/beta1_p1_back.png" alt="Heatmap, β1 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.3 mm · media |d| 3.18 mm · centri entro 0.78 mm da beta1.txt · solo scheletro: 742 ernie, 103 corte</p></article><article class="shape" id="beta2_p1"><header><h3>β2 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta2_p1_front.png" data-caption="Heatmap, β2 = +1, vista da fronte"><img src="images/beta2_p1_front.png" alt="Heatmap, β2 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta2_p1_back.png" data-caption="Heatmap, β2 = +1, vista da retro"><img src="images/beta2_p1_back.png" alt="Heatmap, β2 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.2 mm · media |d| 2.93 mm · centri entro 0.78 mm da beta2.txt · solo scheletro: 4 ernie, 176 corte</p></article><article class="shape" id="beta3_p1"><header><h3>β3 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta3_p1_front.png" data-caption="Heatmap, β3 = +1, vista da fronte"><img src="images/beta3_p1_front.png" alt="Heatmap, β3 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta3_p1_back.png" data-caption="Heatmap, β3 = +1, vista da retro"><img src="images/beta3_p1_back.png" alt="Heatmap, β3 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.3 mm · media |d| 3.08 mm · centri entro 0.78 mm da beta3.txt · solo scheletro: 13 ernie, 149 corte</p></article><article class="shape" id="beta4_p1"><header><h3>β4 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta4_p1_front.png" data-caption="Heatmap, β4 = +1, vista da fronte"><img src="images/beta4_p1_front.png" alt="Heatmap, β4 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta4_p1_back.png" data-caption="Heatmap, β4 = +1, vista da retro"><img src="images/beta4_p1_back.png" alt="Heatmap, β4 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.5 mm · media |d| 2.98 mm · centri entro 0.78 mm da beta4.txt · solo scheletro: 4 ernie, 159 corte</p></article><article class="shape" id="beta5_p1"><header><h3>β5 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta5_p1_front.png" data-caption="Heatmap, β5 = +1, vista da fronte"><img src="images/beta5_p1_front.png" alt="Heatmap, β5 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta5_p1_back.png" data-caption="Heatmap, β5 = +1, vista da retro"><img src="images/beta5_p1_back.png" alt="Heatmap, β5 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.2 mm · media |d| 3.06 mm · centri entro 0.78 mm da beta5.txt · solo scheletro: 8 ernie, 206 corte</p></article><article class="shape" id="beta6_p1"><header><h3>β6 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta6_p1_front.png" data-caption="Heatmap, β6 = +1, vista da fronte"><img src="images/beta6_p1_front.png" alt="Heatmap, β6 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta6_p1_back.png" data-caption="Heatmap, β6 = +1, vista da retro"><img src="images/beta6_p1_back.png" alt="Heatmap, β6 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.3 mm · media |d| 2.89 mm · centri entro 0.78 mm da beta6.txt · solo scheletro: 17 ernie, 156 corte</p></article><article class="shape" id="beta7_p1"><header><h3>β7 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta7_p1_front.png" data-caption="Heatmap, β7 = +1, vista da fronte"><img src="images/beta7_p1_front.png" alt="Heatmap, β7 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta7_p1_back.png" data-caption="Heatmap, β7 = +1, vista da retro"><img src="images/beta7_p1_back.png" alt="Heatmap, β7 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.4 mm · media |d| 2.96 mm · centri entro 0.78 mm da beta7.txt · solo scheletro: 6 ernie, 153 corte</p></article><article class="shape" id="beta8_p1"><header><h3>β8 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 3 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta8_p1_front.png" data-caption="Heatmap, β8 = +1, vista da fronte"><img src="images/beta8_p1_front.png" alt="Heatmap, β8 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta8_p1_back.png" data-caption="Heatmap, β8 = +1, vista da retro"><img src="images/beta8_p1_back.png" alt="Heatmap, β8 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.5 mm · media |d| 2.95 mm · centri entro 0.78 mm da beta8.txt · solo scheletro: 9 ernie, 145 corte</p></article><article class="shape" id="beta9_p1"><header><h3>β9 = +1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 2 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta9_p1_front.png" data-caption="Heatmap, β9 = +1, vista da fronte"><img src="images/beta9_p1_front.png" alt="Heatmap, β9 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta9_p1_back.png" data-caption="Heatmap, β9 = +1, vista da retro"><img src="images/beta9_p1_back.png" alt="Heatmap, β9 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.2 mm · media |d| 3.03 mm · centri entro 0.78 mm da beta9.txt · solo scheletro: 15 ernie, 130 corte</p></article></div>
+</section>
+
+<section aria-labelledby="minus-heading">
+  <h2 id="minus-heading" class="prose">Un beta a −1</h2>
+  <p class="prose">Nessun fit a −1: il tool sottrae l'offset. Le ernie si concentrano su bacino e cosce, dove la parte comune è più grande.
+  Per β5 = −1 le stesse sfere sul corpo a β = 0 danno ancora 68 ernie su 98:
+  vengono dall'offset, non dalla forma.</p>
+  <div class="gallery"><article class="shape" id="beta0_m1"><header><h3>β0 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta0_m1_front.png" data-caption="Heatmap, β0 = -1, vista da fronte"><img src="images/beta0_m1_front.png" alt="Heatmap, β0 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta0_m1_back.png" data-caption="Heatmap, β0 = -1, vista da retro"><img src="images/beta0_m1_back.png" alt="Heatmap, β0 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −27.8 mm · media |d| 3.69 mm · solo scheletro: 0 ernie, 655 corte</p></article><article class="shape" id="beta1_m1"><header><h3>β1 = -1</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 108 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta1_m1_front.png" data-caption="Heatmap, β1 = -1, vista da fronte"><img src="images/beta1_m1_front.png" alt="Heatmap, β1 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta1_m1_back.png" data-caption="Heatmap, β1 = -1, vista da retro"><img src="images/beta1_m1_back.png" alt="Heatmap, β1 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −32.1 mm · media |d| 3.63 mm · solo scheletro: 3 ernie, 1093 corte</p></article><article class="shape" id="beta2_m1"><header><h3>β2 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta2_m1_front.png" data-caption="Heatmap, β2 = -1, vista da fronte"><img src="images/beta2_m1_front.png" alt="Heatmap, β2 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta2_m1_back.png" data-caption="Heatmap, β2 = -1, vista da retro"><img src="images/beta2_m1_back.png" alt="Heatmap, β2 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −23.1 mm · media |d| 3.66 mm · solo scheletro: 19 ernie, 145 corte</p></article><article class="shape" id="beta3_m1"><header><h3>β3 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta3_m1_front.png" data-caption="Heatmap, β3 = -1, vista da fronte"><img src="images/beta3_m1_front.png" alt="Heatmap, β3 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta3_m1_back.png" data-caption="Heatmap, β3 = -1, vista da retro"><img src="images/beta3_m1_back.png" alt="Heatmap, β3 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −25.0 mm · media |d| 3.56 mm · solo scheletro: 7 ernie, 163 corte</p></article><article class="shape" id="beta4_m1"><header><h3>β4 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta4_m1_front.png" data-caption="Heatmap, β4 = -1, vista da fronte"><img src="images/beta4_m1_front.png" alt="Heatmap, β4 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta4_m1_back.png" data-caption="Heatmap, β4 = -1, vista da retro"><img src="images/beta4_m1_back.png" alt="Heatmap, β4 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −25.6 mm · media |d| 3.65 mm · solo scheletro: 15 ernie, 147 corte</p></article><article class="shape" id="beta5_m1"><header><h3>β5 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 98 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta5_m1_front.png" data-caption="Heatmap, β5 = -1, vista da fronte"><img src="images/beta5_m1_front.png" alt="Heatmap, β5 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta5_m1_back.png" data-caption="Heatmap, β5 = -1, vista da retro"><img src="images/beta5_m1_back.png" alt="Heatmap, β5 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −23.3 mm · media |d| 3.59 mm · solo scheletro: 23 ernie, 123 corte</p></article><article class="shape" id="beta6_m1"><header><h3>β6 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 96 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta6_m1_front.png" data-caption="Heatmap, β6 = -1, vista da fronte"><img src="images/beta6_m1_front.png" alt="Heatmap, β6 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta6_m1_back.png" data-caption="Heatmap, β6 = -1, vista da retro"><img src="images/beta6_m1_back.png" alt="Heatmap, β6 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −27.4 mm · media |d| 3.75 mm · solo scheletro: 16 ernie, 175 corte</p></article><article class="shape" id="beta7_m1"><header><h3>β7 = -1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 99 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta7_m1_front.png" data-caption="Heatmap, β7 = -1, vista da fronte"><img src="images/beta7_m1_front.png" alt="Heatmap, β7 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta7_m1_back.png" data-caption="Heatmap, β7 = -1, vista da retro"><img src="images/beta7_m1_back.png" alt="Heatmap, β7 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −25.9 mm · media |d| 3.67 mm · solo scheletro: 9 ernie, 149 corte</p></article><article class="shape" id="beta8_m1"><header><h3>β8 = -1</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 104 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta8_m1_front.png" data-caption="Heatmap, β8 = -1, vista da fronte"><img src="images/beta8_m1_front.png" alt="Heatmap, β8 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta8_m1_back.png" data-caption="Heatmap, β8 = -1, vista da retro"><img src="images/beta8_m1_back.png" alt="Heatmap, β8 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −25.4 mm · media |d| 3.66 mm · solo scheletro: 8 ernie, 158 corte</p></article><article class="shape" id="beta9_m1"><header><h3>β9 = -1</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 101 ernie</span></header><div class="pair"><button class="shot" type="button" data-full="images/beta9_m1_front.png" data-caption="Heatmap, β9 = -1, vista da fronte"><img src="images/beta9_m1_front.png" alt="Heatmap, β9 = -1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/beta9_m1_back.png" data-caption="Heatmap, β9 = -1, vista da retro"><img src="images/beta9_m1_back.png" alt="Heatmap, β9 = -1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −25.1 mm · media |d| 3.61 mm · solo scheletro: 7 ernie, 181 corte</p></article></div>
+</section>
+
+<section aria-labelledby="combo-heading">
+  <h2 id="combo-heading" class="prose">Combinazioni</h2>
+  <p class="prose">Due offset sommati: con β0 e β1 a +1 la parte comune entra due volte; con β1 = +1 e β2 = −1 si annulla.</p>
+  <div class="gallery"><article class="shape" id="combo_b0p1_b1p1"><header><h3>β0 = +1, β1 = +1</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 40 ernie</span></header><p class="betas">β0 = +1, β1 = +1</p><div class="pair"><button class="shot" type="button" data-full="images/combo_b0p1_b1p1_front.png" data-caption="Heatmap, β0 = +1, β1 = +1, vista da fronte"><img src="images/combo_b0p1_b1p1_front.png" alt="Heatmap, β0 = +1, β1 = +1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/combo_b0p1_b1p1_back.png" data-caption="Heatmap, β0 = +1, β1 = +1, vista da retro"><img src="images/combo_b0p1_b1p1_back.png" alt="Heatmap, β0 = +1, β1 = +1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −33.0 mm · media |d| 3.50 mm · solo scheletro: 1393 ernie, 58 corte</p></article><article class="shape" id="combo_b1p1_b2m1"><header><h3>β1 = +1, β2 = −1</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 9 ernie</span></header><p class="betas">β1 = +1, β2 = −1</p><div class="pair"><button class="shot" type="button" data-full="images/combo_b1p1_b2m1_front.png" data-caption="Heatmap, β1 = +1, β2 = −1, vista da fronte"><img src="images/combo_b1p1_b2m1_front.png" alt="Heatmap, β1 = +1, β2 = −1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/combo_b1p1_b2m1_back.png" data-caption="Heatmap, β1 = +1, β2 = −1, vista da retro"><img src="images/combo_b1p1_b2m1_back.png" alt="Heatmap, β1 = +1, β2 = −1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −11.6 mm · media |d| 3.33 mm · solo scheletro: 861 ernie, 101 corte</p></article></div>
+</section>
+
+<section aria-labelledby="random-heading">
+  <h2 id="random-heading" class="prose">Random shape</h2>
+  <p class="prose">Le dieci righe di <code>data/random_shapes.csv</code>, applicate con lo slider <em>Random shape (CSV)</em>.</p>
+  <div class="gallery"><article class="shape" id="random01"><header><h3>Random shape 1</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 1030 ernie</span></header><p class="betas">β0 = −0.19, β1 = −2.46, β2 = −1.61, β3 = +0.77, β4 = +1.26, β5 = −0.52, β6 = −1.51, β7 = −0.13, β8 = −1.42, β9 = +0.01</p><div class="pair"><button class="shot" type="button" data-full="images/random01_front.png" data-caption="Heatmap, Random shape 1, vista da fronte"><img src="images/random01_front.png" alt="Heatmap, Random shape 1, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random01_back.png" data-caption="Heatmap, Random shape 1, vista da retro"><img src="images/random01_back.png" alt="Heatmap, Random shape 1, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −166.0 mm · media |d| 12.09 mm · solo scheletro: 10 ernie, 2387 corte</p></article><article class="shape" id="random02"><header><h3>Random shape 2</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 1120 ernie</span></header><p class="betas">β0 = −1.22, β1 = +0.31, β2 = −0.43, β3 = −2.09, β4 = −0.91, β5 = +0.49, β6 = +0.05, β7 = +1.15, β8 = −1.96, β9 = −1.79</p><div class="pair"><button class="shot" type="button" data-full="images/random02_front.png" data-caption="Heatmap, Random shape 2, vista da fronte"><img src="images/random02_front.png" alt="Heatmap, Random shape 2, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random02_back.png" data-caption="Heatmap, Random shape 2, vista da retro"><img src="images/random02_back.png" alt="Heatmap, Random shape 2, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −160.6 mm · media |d| 14.15 mm · solo scheletro: 2 ernie, 1061 corte</p></article><article class="shape" id="random03"><header><h3>Random shape 3</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 312 ernie</span></header><p class="betas">β0 = −0.42, β1 = +1.01, β2 = +1.37, β3 = −2.31, β4 = +1.00, β5 = +1.49, β6 = +0.12, β7 = +1.90, β8 = −0.75, β9 = +0.18</p><div class="pair"><button class="shot" type="button" data-full="images/random03_front.png" data-caption="Heatmap, Random shape 3, vista da fronte"><img src="images/random03_front.png" alt="Heatmap, Random shape 3, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random03_back.png" data-caption="Heatmap, Random shape 3, vista da retro"><img src="images/random03_back.png" alt="Heatmap, Random shape 3, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −119.9 mm · media |d| 6.60 mm · solo scheletro: 14 ernie, 366 corte</p></article><article class="shape" id="random04"><header><h3>Random shape 4</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 813 ernie</span></header><p class="betas">β0 = +1.07, β1 = −0.60, β2 = +0.02, β3 = +1.22, β4 = −1.47, β5 = +0.03, β6 = −0.73, β7 = −0.54, β8 = −2.16, β9 = −1.36</p><div class="pair"><button class="shot" type="button" data-full="images/random04_front.png" data-caption="Heatmap, Random shape 4, vista da fronte"><img src="images/random04_front.png" alt="Heatmap, Random shape 4, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random04_back.png" data-caption="Heatmap, Random shape 4, vista da retro"><img src="images/random04_back.png" alt="Heatmap, Random shape 4, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −136.0 mm · media |d| 9.57 mm · solo scheletro: 204 ernie, 168 corte</p></article><article class="shape" id="random05"><header><h3>Random shape 5</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 1 ernia</span></header><p class="betas">β0 = +0.09, β1 = +0.04, β2 = −0.29, β3 = +0.47, β4 = −0.30, β5 = +0.95, β6 = +1.63, β7 = −0.74, β8 = −0.12, β9 = −0.72</p><div class="pair"><button class="shot" type="button" data-full="images/random05_front.png" data-caption="Heatmap, Random shape 5, vista da fronte"><img src="images/random05_front.png" alt="Heatmap, Random shape 5, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random05_back.png" data-caption="Heatmap, Random shape 5, vista da retro"><img src="images/random05_back.png" alt="Heatmap, Random shape 5, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −10.1 mm · media |d| 2.96 mm · solo scheletro: 12 ernie, 180 corte</p></article><article class="shape" id="random06"><header><h3>Random shape 6</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 93 ernie</span></header><p class="betas">β0 = +0.14, β1 = −0.74, β2 = −0.80, β3 = +0.97, β4 = +0.68, β5 = +1.01, β6 = +0.92, β7 = +0.54, β8 = −0.17, β9 = +0.30</p><div class="pair"><button class="shot" type="button" data-full="images/random06_front.png" data-caption="Heatmap, Random shape 6, vista da fronte"><img src="images/random06_front.png" alt="Heatmap, Random shape 6, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random06_back.png" data-caption="Heatmap, Random shape 6, vista da retro"><img src="images/random06_back.png" alt="Heatmap, Random shape 6, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −65.5 mm · media |d| 4.18 mm · solo scheletro: 7 ernie, 738 corte</p></article><article class="shape" id="random07"><header><h3>Random shape 7</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 75 ernie</span></header><p class="betas">β0 = +1.05, β1 = +0.67, β2 = −0.43, β3 = −0.51, β4 = +0.21, β5 = +0.47, β6 = −0.08, β7 = −0.88, β8 = +0.48, β9 = +1.84</p><div class="pair"><button class="shot" type="button" data-full="images/random07_front.png" data-caption="Heatmap, Random shape 7, vista da fronte"><img src="images/random07_front.png" alt="Heatmap, Random shape 7, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random07_back.png" data-caption="Heatmap, Random shape 7, vista da retro"><img src="images/random07_back.png" alt="Heatmap, Random shape 7, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −45.7 mm · media |d| 4.01 mm · solo scheletro: 1179 ernie, 49 corte</p></article><article class="shape" id="random08"><header><h3>Random shape 8</h3><span class="chip critical"><span class="dot" aria-hidden="true"></span>critico · 440 ernie</span></header><p class="betas">β0 = −1.28, β1 = +0.04, β2 = +2.33, β3 = +1.27, β4 = +0.76, β5 = +1.08, β6 = −0.14, β7 = −0.67, β8 = +1.27, β9 = +0.50</p><div class="pair"><button class="shot" type="button" data-full="images/random08_front.png" data-caption="Heatmap, Random shape 8, vista da fronte"><img src="images/random08_front.png" alt="Heatmap, Random shape 8, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random08_back.png" data-caption="Heatmap, Random shape 8, vista da retro"><img src="images/random08_back.png" alt="Heatmap, Random shape 8, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −150.3 mm · media |d| 9.14 mm · solo scheletro: 0 ernie, 1475 corte</p></article><article class="shape" id="random09"><header><h3>Random shape 9</h3><span class="chip warning"><span class="dot" aria-hidden="true"></span>attenzione · 62 ernie</span></header><p class="betas">β0 = −1.07, β1 = −0.25, β2 = +0.92, β3 = +0.79, β4 = +0.31, β5 = +1.29, β6 = −0.01, β7 = +0.31, β8 = −0.11, β9 = −0.03</p><div class="pair"><button class="shot" type="button" data-full="images/random09_front.png" data-caption="Heatmap, Random shape 9, vista da fronte"><img src="images/random09_front.png" alt="Heatmap, Random shape 9, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random09_back.png" data-caption="Heatmap, Random shape 9, vista da retro"><img src="images/random09_back.png" alt="Heatmap, Random shape 9, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −49.6 mm · media |d| 3.79 mm · solo scheletro: 0 ernie, 1704 corte</p></article><article class="shape" id="random10"><header><h3>Random shape 10</h3><span class="chip good"><span class="dot" aria-hidden="true"></span>ok · 6 ernie</span></header><p class="betas">β0 = −1.20, β1 = −0.64, β2 = +1.11, β3 = +1.69, β4 = −0.03, β5 = +0.08, β6 = +0.19, β7 = −0.46, β8 = −0.51, β9 = +0.32</p><div class="pair"><button class="shot" type="button" data-full="images/random10_front.png" data-caption="Heatmap, Random shape 10, vista da fronte"><img src="images/random10_front.png" alt="Heatmap, Random shape 10, vista da fronte" width="976" height="960" decoding="async"></button><button class="shot" type="button" data-full="images/random10_back.png" data-caption="Heatmap, Random shape 10, vista da retro"><img src="images/random10_back.png" alt="Heatmap, Random shape 10, vista da retro" width="976" height="960" decoding="async"></button></div><p class="figures">min d −11.8 mm · media |d| 3.18 mm · solo scheletro: 0 ernie, 1815 corte</p></article></div>
+</section>
+
+<section class="prose" aria-labelledby="method-heading">
+  <h2 id="method-heading">Come sono state fatte</h2>
+  <ul>
+    <li>Il tool vero, guidato da uno script senza toccare il codice: avvio in star pose con il template, <em>Load Beta Offsets</em>,
+    <em>Show heatmap</em>, sfere nascoste, corpo opaco. I beta passano dal campo <em>Load betas</em>, le forme casuali dallo slider
+    del CSV. Nessuna immagine è stata fatta a mano.</li>
+    <li>Camera ortografica fissa, uguale per tutte le forme, così le differenze di altezza e larghezza si vedono.</li>
+    <li>I numeri sono gli stessi valori di d che colorano le immagini.</li>
+    <li>La colonna <em>senza parte comune</em> è una diagnosi, non la correzione: la media degli offset di β5–β9 contiene anche il loro
+    piccolo effetto di forma. La correzione proposta è calcolare gli offset contro un fit di controllo (la stessa procedura sulla mesh
+    base), ed è ancora da decidere.</li>
+  </ul>
+</section>
+</main>
+
+<div class="tooltip" id="tooltip" role="status"></div>
+<dialog id="viewer" aria-label="Immagine ingrandita">
+  <div class="bar"><span id="viewer-caption"></span><button type="button" id="viewer-close">Chiudi</button></div>
+  <img id="viewer-image" alt="">
+</dialog>
+<script>
+(() => {
+  const viewer = document.getElementById("viewer");
+  const viewerImage = document.getElementById("viewer-image");
+  const viewerCaption = document.getElementById("viewer-caption");
+  document.querySelectorAll(".shot").forEach((shotButton) => {
+    shotButton.addEventListener("click", () => {
+      viewerImage.src = shotButton.dataset.full;
+      viewerImage.alt = shotButton.dataset.caption;
+      viewerCaption.textContent = shotButton.dataset.caption;
+      if (typeof viewer.showModal === "function") viewer.showModal();
+    });
+  });
+  document.getElementById("viewer-close").addEventListener("click", () => viewer.close());
+  viewer.addEventListener("click", (event) => { if (event.target === viewer) viewer.close(); });
+
+  const tooltip = document.getElementById("tooltip");
+  const showTip = (target, clientX, clientY) => {
+    tooltip.textContent = target.dataset.tip;
+    tooltip.style.display = "block";
+    const box = tooltip.getBoundingClientRect();
+    const left = Math.min(clientX + 14, window.innerWidth - box.width - 8);
+    tooltip.style.left = `${Math.max(8, left)}px`;
+    tooltip.style.top = `${Math.max(8, clientY - box.height - 12)}px`;
+  };
+  document.querySelectorAll(".hit").forEach((hitTarget) => {
+    hitTarget.addEventListener("mousemove", (event) => showTip(hitTarget, event.clientX, event.clientY));
+    hitTarget.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+    hitTarget.addEventListener("focus", () => {
+      const box = hitTarget.getBoundingClientRect();
+      showTip(hitTarget, box.left + box.width / 2, box.top);
+    });
+    hitTarget.addEventListener("blur", () => { tooltip.style.display = "none"; });
+  });
+})();
+</script>
+</body>
+</html>

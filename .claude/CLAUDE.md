@@ -21,7 +21,7 @@ when matching files are touched. Agents for recurring jobs live in `.claude/agen
 | Run the app | `uv run python main.py` |
 | Packaging self-test | `uv run python main.py --selftest` |
 | Windows build | `uv run python build_exe.py` (see README) |
-| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `scripts/test_random_pose_shape.py`, `scripts/test_lbs_binding.py` |
+| GUI tests (headless, real `MainWindow`) | `uv run python scripts/test_spheremesh_port.py`, `scripts/test_divide_connection.py`, `scripts/test_color_schemes.py`, `scripts/test_fit_spheres_ui.py`, `scripts/test_random_pose_shape.py`, `scripts/test_lbs_binding.py`, `scripts/test_star_pose_startup.py` |
 | Rigid vs LBS binding against the posed body | `uv run python scripts/compare_binding_modes.py [--json out.json]` |
 | SphereMesh class test | `scripts/test_sphere_mesh.py` |
 | Fitter tests | `scripts/test_sphere_fit.py`, `scripts/test_sphere_fit_inflation.py` |
@@ -52,7 +52,17 @@ GUI modules:
 | `src/smpl_models.py`, `src/app_paths.py` | Model and template paths, frozen-build aware. |
 
 Data:
-- **Startup templates:** `data/template_{male,female}_1.0.json`.
+- **Startup templates** (`startup_spheremesh_template_path`):
+  - male: `data/template_male_1.1_starpose.txt` (engine text, star pose). It is also the
+    base of the beta offsets (`extract_beta_offsets.py`) and the input of
+    `SMFitting/mainbeta.py`. `SMFitting/main.py` still saves its fit to
+    `SMFitting/output/template_male_1.1.txt`, which nothing reads; copy a new fit in on
+    purpose.
+  - `data/template_male_1.1.txt` is an older, different 1.1 (legs re-posed by hand). The
+    GUI does not use it.
+  - female: `data/template_female_1.0.json`.
+  - Scripts that fit on the neutral body keep `spheremesh_template_path`
+    (`data/template_*_1.0.json`).
 - **GUI saves:** `data/save_DDMMYYYY_HHMM.json` plus a named `.txt`.
 - **JSON format (version 2):**
   `{"spheres": [{center, radius, parent_joint, rest_offset, secondary_joint, secondary_rest_offset, lbs_weight, rest_radius, nearest_vertex_index, locked}], "connections": [{"indices": [a, b(, c)]}]}`
@@ -65,6 +75,9 @@ Topology docs:
 ## Facts that are easy to get wrong
 
 - `+X` is the body's **left** side.
+- The GUI starts in the **star pose**, not θ = 0: `default_theta_tensor()` turns
+  left_hip Z +0.3 and right_hip Z −0.3. That is `SMFitting/examples/SMPL_starpose.obj`, the
+  pose the SMFitting templates are fitted in. Reset and pose row 0 still give θ = 0.
 - Connections refer to spheres **by index**:
   - New spheres are appended, never inserted.
   - Duplicate connections exist (the female template has `(0, 1)` three times), so
@@ -191,3 +204,24 @@ Topology docs:
     `_rest_offset_from_posed_center`, `update_sphere_positions`;
     `MainWindow._on_lbs_binding_toggled`.
   - Tests: `scripts/test_lbs_binding.py`; measurement: `scripts/compare_binding_modes.py`.
+- **Star-pose startup (2026-11):**
+  - What it does: the body starts with its legs apart, as in `SMPL_starpose.obj` (every OBJ
+    vertex within 0.001 mm). The male template is the SMFitting fit,
+    `data/template_male_1.1_starpose.txt`, loaded where the file puts it. Theta Controls
+    shares the pose tensor; its pose picker shows "(edited)".
+  - Binding: `assign_parent_joint` is pose-aware (see `.claude/rules/gui-editing.md`), so
+    templates loaded under a pose, and Reassign all parents under a pose, keep the spheres
+    where they are shown.
+  - A gender switch binds the new template at the star pose and betas 0 (the pose and shape
+    of the male .txt), then restores the user's pose and betas.
+  - Known limits:
+    - Spheres bound under the star pose reproduce the file only in the mode active at load.
+      Toggling LBS off moves them up to 9.1 mm.
+    - The first beta change re-derives the LBS weights, and the crotch-flip limitation then
+      moves s22 by 8.7 mm (reviewer's measurement).
+    - Load Topology / Import still run no FK, so a θ = 0 JSON shows unposed until the next
+      pose tick.
+  - The template sits in `data/`, so the build bundles it and seeds it next to the exe.
+  - Code: `default_theta_tensor`, `startup_spheremesh_template_path`,
+    `MainWindow._load_spheremesh_file`, `SphereManager._is_posed` / `assign_parent_joint`.
+  - Test: `scripts/test_star_pose_startup.py`.

@@ -1,0 +1,542 @@
+{
+  "common_offset_spheres": [
+    {
+      "sphere": "s27",
+      "offset_mm_by_beta": [
+        56.0,
+        58.7,
+        35.8,
+        43.0,
+        43.4,
+        50.2,
+        42.9,
+        48.7,
+        42.5,
+        46.6
+      ],
+      "dr_mm_by_beta": [
+        1.2,
+        1.3,
+        6.6,
+        5.7,
+        5.9,
+        8.2,
+        2.9,
+        5.7,
+        5.4,
+        4.0
+      ]
+    },
+    {
+      "sphere": "s23",
+      "offset_mm_by_beta": [
+        50.9,
+        47.9,
+        40.2,
+        41.7,
+        42.8,
+        45.5,
+        44.2,
+        45.1,
+        43.1,
+        44.6
+      ],
+      "dr_mm_by_beta": [
+        -18.2,
+        -19.6,
+        -11.4,
+        -12.8,
+        -13.6,
+        -10.8,
+        -16.5,
+        -12.7,
+        -12.9,
+        -14.5
+      ]
+    },
+    {
+      "sphere": "s51",
+      "offset_mm_by_beta": [
+        32.9,
+        30.6,
+        25.7,
+        22.6,
+        24.8,
+        31.2,
+        23.7,
+        30.5,
+        28.8,
+        28.5
+      ],
+      "dr_mm_by_beta": [
+        -3.9,
+        -9.5,
+        -5.0,
+        -0.3,
+        -2.4,
+        -3.4,
+        -3.2,
+        -11.5,
+        -10.7,
+        -10.9
+      ]
+    },
+    {
+      "sphere": "s50",
+      "offset_mm_by_beta": [
+        15.0,
+        28.8,
+        34.0,
+        30.9,
+        26.3,
+        23.7,
+        24.4,
+        28.1,
+        29.8,
+        26.8
+      ],
+      "dr_mm_by_beta": [
+        -15.7,
+        -14.4,
+        -7.3,
+        -10.9,
+        -9.0,
+        -8.3,
+        -9.5,
+        -7.8,
+        -7.9,
+        -9.5
+      ]
+    },
+    {
+      "sphere": "s54",
+      "offset_mm_by_beta": [
+        14.4,
+        30.2,
+        30.8,
+        28.3,
+        27.7,
+        27.6,
+        23.8,
+        24.5,
+        26.0,
+        25.5
+      ],
+      "dr_mm_by_beta": [
+        -6.5,
+        -4.2,
+        -1.7,
+        -3.0,
+        -2.3,
+        -1.8,
+        -2.4,
+        -2.0,
+        -2.2,
+        -3.1
+      ]
+    }
+  ],
+  "betas_5_9": {
+    "largest_offset_mm": 50.2,
+    "largest_distance_from_mean_mm": 12.0
+  },
+  "beta5_minus1": {
+    "offset_spheres_on_shaped_body": [
+      98,
+      -23.3
+    ],
+    "offset_spheres_on_base_body": [
+      68,
+      -19.9
+    ],
+    "template_spheres_on_shaped_body": [
+      35,
+      -14.0
+    ],
+    "owners_percent": [
+      [
+        "s22",
+        23
+      ],
+      [
+        "s50",
+        23
+      ],
+      [
+        "s23",
+        18
+      ],
+      [
+        "s27",
+        10
+      ]
+    ]
+  },
+  "beta_sum_vs_hernias": [
+    {
+      "id": "template",
+      "beta_sum": 0.0,
+      "hernias": 3,
+      "min": -10.5
+    },
+    {
+      "id": "beta0_p1",
+      "beta_sum": 1.0,
+      "hernias": 2,
+      "min": -10.3
+    },
+    {
+      "id": "beta1_p1",
+      "beta_sum": 1.0,
+      "hernias": 1,
+      "min": -10.3
+    },
+    {
+      "id": "beta2_p1",
+      "beta_sum": 1.0,
+      "hernias": 2,
+      "min": -10.2
+    },
+    {
+      "id": "beta3_p1",
+      "beta_sum": 1.0,
+      "hernias": 1,
+      "min": -10.3
+    },
+    {
+      "id": "beta4_p1",
+      "beta_sum": 1.0,
+      "hernias": 2,
+      "min": -10.5
+    },
+    {
+      "id": "beta5_p1",
+      "beta_sum": 1.0,
+      "hernias": 1,
+      "min": -10.2
+    },
+    {
+      "id": "beta6_p1",
+      "beta_sum": 1.0,
+      "hernias": 1,
+      "min": -10.3
+    },
+    {
+      "id": "beta7_p1",
+      "beta_sum": 1.0,
+      "hernias": 3,
+      "min": -10.4
+    },
+    {
+      "id": "beta8_p1",
+      "beta_sum": 1.0,
+      "hernias": 3,
+      "min": -10.5
+    },
+    {
+      "id": "beta9_p1",
+      "beta_sum": 1.0,
+      "hernias": 2,
+      "min": -10.2
+    },
+    {
+      "id": "beta0_m1",
+      "beta_sum": -1.0,
+      "hernias": 96,
+      "min": -27.8
+    },
+    {
+      "id": "beta1_m1",
+      "beta_sum": -1.0,
+      "hernias": 108,
+      "min": -32.1
+    },
+    {
+      "id": "beta2_m1",
+      "beta_sum": -1.0,
+      "hernias": 93,
+      "min": -23.1
+    },
+    {
+      "id": "beta3_m1",
+      "beta_sum": -1.0,
+      "hernias": 93,
+      "min": -25.0
+    },
+    {
+      "id": "beta4_m1",
+      "beta_sum": -1.0,
+      "hernias": 96,
+      "min": -25.6
+    },
+    {
+      "id": "beta5_m1",
+      "beta_sum": -1.0,
+      "hernias": 98,
+      "min": -23.3
+    },
+    {
+      "id": "beta6_m1",
+      "beta_sum": -1.0,
+      "hernias": 96,
+      "min": -27.4
+    },
+    {
+      "id": "beta7_m1",
+      "beta_sum": -1.0,
+      "hernias": 99,
+      "min": -25.9
+    },
+    {
+      "id": "beta8_m1",
+      "beta_sum": -1.0,
+      "hernias": 104,
+      "min": -25.4
+    },
+    {
+      "id": "beta9_m1",
+      "beta_sum": -1.0,
+      "hernias": 101,
+      "min": -25.1
+    },
+    {
+      "id": "combo_b0p1_b1p1",
+      "beta_sum": 2.0,
+      "hernias": 40,
+      "min": -33.0
+    },
+    {
+      "id": "combo_b1p1_b2m1",
+      "beta_sum": 0.0,
+      "hernias": 9,
+      "min": -11.6
+    },
+    {
+      "id": "random01",
+      "beta_sum": -5.8,
+      "hernias": 1030,
+      "min": -166.0
+    },
+    {
+      "id": "random02",
+      "beta_sum": -6.4,
+      "hernias": 1120,
+      "min": -160.6
+    },
+    {
+      "id": "random03",
+      "beta_sum": 3.6,
+      "hernias": 312,
+      "min": -119.9
+    },
+    {
+      "id": "random04",
+      "beta_sum": -4.53,
+      "hernias": 813,
+      "min": -136.0
+    },
+    {
+      "id": "random05",
+      "beta_sum": 1.02,
+      "hernias": 1,
+      "min": -10.1
+    },
+    {
+      "id": "random06",
+      "beta_sum": 2.85,
+      "hernias": 93,
+      "min": -65.5
+    },
+    {
+      "id": "random07",
+      "beta_sum": 2.82,
+      "hernias": 75,
+      "min": -45.7
+    },
+    {
+      "id": "random08",
+      "beta_sum": 5.16,
+      "hernias": 440,
+      "min": -150.3
+    },
+    {
+      "id": "random09",
+      "beta_sum": 2.15,
+      "hernias": 62,
+      "min": -49.6
+    },
+    {
+      "id": "random10",
+      "beta_sum": 0.55,
+      "hernias": 6,
+      "min": -11.8
+    }
+  ],
+  "common_part_removed": [
+    {
+      "id": "template",
+      "hernias": 3,
+      "min": -10.5
+    },
+    {
+      "id": "beta0_p1",
+      "hernias": 7,
+      "min": -11.7
+    },
+    {
+      "id": "beta1_p1",
+      "hernias": 4,
+      "min": -11.2
+    },
+    {
+      "id": "beta2_p1",
+      "hernias": 4,
+      "min": -10.9
+    },
+    {
+      "id": "beta3_p1",
+      "hernias": 6,
+      "min": -10.7
+    },
+    {
+      "id": "beta4_p1",
+      "hernias": 5,
+      "min": -10.9
+    },
+    {
+      "id": "beta5_p1",
+      "hernias": 4,
+      "min": -10.8
+    },
+    {
+      "id": "beta6_p1",
+      "hernias": 3,
+      "min": -11.2
+    },
+    {
+      "id": "beta7_p1",
+      "hernias": 3,
+      "min": -10.9
+    },
+    {
+      "id": "beta8_p1",
+      "hernias": 1,
+      "min": -10.7
+    },
+    {
+      "id": "beta9_p1",
+      "hernias": 3,
+      "min": -10.7
+    },
+    {
+      "id": "beta0_m1",
+      "hernias": 6,
+      "min": -11.4
+    },
+    {
+      "id": "beta1_m1",
+      "hernias": 8,
+      "min": -11.5
+    },
+    {
+      "id": "beta2_m1",
+      "hernias": 5,
+      "min": -11.2
+    },
+    {
+      "id": "beta3_m1",
+      "hernias": 6,
+      "min": -11.2
+    },
+    {
+      "id": "beta4_m1",
+      "hernias": 7,
+      "min": -11.0
+    },
+    {
+      "id": "beta5_m1",
+      "hernias": 6,
+      "min": -12.0
+    },
+    {
+      "id": "beta6_m1",
+      "hernias": 5,
+      "min": -11.3
+    },
+    {
+      "id": "beta7_m1",
+      "hernias": 6,
+      "min": -11.2
+    },
+    {
+      "id": "beta8_m1",
+      "hernias": 7,
+      "min": -11.1
+    },
+    {
+      "id": "beta9_m1",
+      "hernias": 4,
+      "min": -11.3
+    },
+    {
+      "id": "combo_b0p1_b1p1",
+      "hernias": 9,
+      "min": -12.2
+    },
+    {
+      "id": "combo_b1p1_b2m1",
+      "hernias": 9,
+      "min": -11.6
+    },
+    {
+      "id": "random01",
+      "hernias": 175,
+      "min": -18.6
+    },
+    {
+      "id": "random02",
+      "hernias": 136,
+      "min": -15.7
+    },
+    {
+      "id": "random03",
+      "hernias": 13,
+      "min": -14.2
+    },
+    {
+      "id": "random04",
+      "hernias": 72,
+      "min": -15.7
+    },
+    {
+      "id": "random05",
+      "hernias": 8,
+      "min": -11.8
+    },
+    {
+      "id": "random06",
+      "hernias": 19,
+      "min": -13.2
+    },
+    {
+      "id": "random07",
+      "hernias": 8,
+      "min": -12.1
+    },
+    {
+      "id": "random08",
+      "hernias": 47,
+      "min": -15.1
+    },
+    {
+      "id": "random09",
+      "hernias": 10,
+      "min": -12.1
+    },
+    {
+      "id": "random10",
+      "hernias": 9,
+      "min": -12.4
+    }
+  ]
+}

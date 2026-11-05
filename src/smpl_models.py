@@ -29,6 +29,14 @@ _GENDER_TO_TEMPLATE_FILENAME: dict[str, str] = {
     FEMALE: "template_female_1.0.json",
 }
 
+# The sphere configuration the GUI starts on, where it differs from the shipped one: the
+# SMFitting fit in the star pose the GUI starts in, which the beta offsets in data/offsets
+# are taken against. It lives in data/, apart from SMFitting/output/, which the notebook
+# rewrites. Scripts that fit on the neutral body keep using spheremesh_template_path.
+_GENDER_TO_STARTUP_TEMPLATE_FILENAME: dict[str, str] = {
+    MALE: "template_male_1.1_starpose.txt",
+}
+
 # Loading an .npz and building the torch buffers takes about a second, so keep every
 # model that has been requested alive: switching gender back and forth is then instant.
 _loaded_models_by_gender: dict[str, SMPL] = {}
@@ -54,6 +62,14 @@ def spheremesh_template_path(gender: str) -> Path:
             f"Unknown SMPL gender {gender!r}; expected one of {GENDERS}"
         ) from None
     return data_file(filename)
+
+
+def startup_spheremesh_template_path(gender: str) -> Path:
+    """Path of the sphere configuration the GUI loads for *gender*: a tool .json or an engine .txt."""
+    startup_filename = _GENDER_TO_STARTUP_TEMPLATE_FILENAME.get(gender)
+    if startup_filename is None:
+        return spheremesh_template_path(gender)
+    return data_file(startup_filename)
 
 
 def load_smpl_model(gender: str) -> SMPL:
