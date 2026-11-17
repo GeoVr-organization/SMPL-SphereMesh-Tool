@@ -14,6 +14,7 @@ import itertools
 import json
 import os
 import random
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -51,6 +52,57 @@ REST_POSE_TOLERANCE = 1e-9
 _MIN_RADIUS_BETA: float = 1e-4
 _BETA_CSV_REQUIRED: set = {"sphere_id", "dx", "dy", "dz", "dr"}
 
+# Largest sphere set a Ctrl+click selection collects: a triangle has 3 spheres.
+MAX_CONNECTION_SPHERES = 3
+# Metres between a sphere's X-mirror image and its twin's centre; the same default as the
+# mirror edits and check_x_symmetry.
+MIRROR_TWIN_TOLERANCE = 0.02
+
+
+def describe_sphere_indices(sphere_indices) -> str:
+    """Short label such as 'cone (3, 7)' or 'triangle (1, 3, 4)'."""
+    kind = "cone" if len(sphere_indices) == 2 else "triangle"
+    return f"{kind} ({', '.join(str(int(i)) for i in sphere_indices)})"
+
+
+@dataclass
+class ConnectionCandidate:
+    """A cone or triangle checked and built but not yet registered (see prepare_connection_candidate).
+
+    `connection` is None when the candidate is blocked: an existing connection already covers
+    it, or its geometry cannot be built. The mirror fields describe the X-mirrored connection
+    on the twin spheres, when there is one.
+    """
+    sphere_indices: Tuple[int, ...]
+    connection: Optional[SphereConnection] = None
+    covering_connection: Optional[SphereConnection] = None
+    invalid_indices: bool = False
+    build_failed: bool = False
+    connections_to_remove: List[SphereConnection] = field(default_factory=list)
+    mirror_sphere_indices: Optional[Tuple[int, ...]] = None
+    mirror_connection: Optional[SphereConnection] = None
+    mirror_covering_connection: Optional[SphereConnection] = None
+    mirror_connections_to_remove: List[SphereConnection] = field(default_factory=list)
+    # Spheres with no X twin within MIRROR_TWIN_TOLERANCE, when that is why there is no mirror
+    # (often an asymmetric pose: twins are looked up at the posed centres).
+    spheres_without_mirror_twin: List[int] = field(default_factory=list)
+
+    def blocking_reason(self) -> Optional[str]:
+        """Why the connection cannot be created, or None when it can."""
+        if self.invalid_indices:
+            return "A connection needs 2 or 3 different spheres that exist."
+        if self.covering_connection is not None:
+            covering_indices = self.covering_connection.sphere_indices
+            if len(covering_indices) == len(self.sphere_indices):
+                return f"It already exists: {describe_sphere_indices(covering_indices)}."
+            return (
+                f"{describe_sphere_indices(covering_indices).capitalize()} already contains "
+                "this cone as an edge."
+            )
+        if self.build_failed:
+            return "Two of these spheres have the same centre, so no shape can be built."
+        return None
+
 
 def _trim_center_xyz_3decimals(center) -> list[float]:
     """Round sphere center x,y,z to three digits after the decimal when loading saves."""
@@ -67,6 +119,9 @@ class SphereManager:
         # Cone or triangle picked in the 3D view. Exclusive with selected_sphere_index.
         # Stored as the object, not its indices: duplicate connections exist.
         self.selected_connection: Optional[SphereConnection] = None
+        # Spheres collected with Ctrl+click for a new connection, in click order. Stored as
+        # objects so a deletion or a load can't leave the set pointing at other spheres.
+        self._pending_connection_spheres: List[ManagedSphere] = []
 
         self.update_sphere_information_callback = sphere_information_callback
         self.spheremesh_visible = False
@@ -429,6 +484,7 @@ class SphereManager:
         #self.assign_parent_joint(new_i)
         self.selected_sphere_index = new_i
         self.selected_connection = None
+        self._pending_connection_spheres = []
         self._highlight_selection()
 
         if self.spheremesh_visible:
@@ -497,6 +553,262 @@ class SphereManager:
         if self.spheremesh_visible:
             connection.set_visibility(True)
         connection.set_connector_visibility(self.sphere_widgets_visible)
+
+    # --- New connections: Ctrl+click set, redundancy, mirror ------------------
+
+    def get_pending_connection_sphere_indices(self) -> List[int]:
+        """Indices of the spheres collected with Ctrl+click, in click order."""
+        return [
+            self.spheres.index(pending_sphere)
+            for pending_sphere in self._pending_connection_spheres
+            if pending_sphere in self.spheres
+        ]
+
+    def toggle_pending_connection_sphere(self, sphere_index: int) -> str:
+        """Add a Ctrl+clicked sphere to the set, or take it out if it is already in.
+
+        The first Ctrl+click starts from the sphere already selected, so a click on sphere 0
+        and a Ctrl+click on sphere 1 give (0, 1); a selected cone or triangle is dropped. The
+        last sphere added is the selected one the InfoPanel shows. Returns "added", "removed"
+        or "full" (a fourth sphere, which is ignored).
+        """
+        pending_indices = self.get_pending_connection_sphere_indices()
+        if not pending_indices and self.get_selected_connection() is None:
+            selected_index = self.selected_sphere_index
+            if selected_index is not None and 0 <= selected_index < len(self.spheres):
+                pending_indices = [selected_index]
+        if sphere_index in pending_indices:
+            pending_indices.remove(sphere_index)
+            outcome = "removed"
+        elif len(pending_indices) >= MAX_CONNECTION_SPHERES:
+            print(
+                f"A connection joins at most {MAX_CONNECTION_SPHERES} spheres; "
+                f"sphere {sphere_index} not added"
+            )
+            return "full"
+        else:
+            pending_indices.append(sphere_index)
+            outcome = "added"
+        self._pending_connection_spheres = [self.spheres[i] for i in pending_indices]
+        self.selected_connection = None
+        self.selected_sphere_index = pending_indices[-1] if pending_indices else None
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+        return outcome
+
+    def clear_pending_connection_spheres(self) -> None:
+        """Forget the Ctrl+click set; the selected sphere stays selected."""
+        self._pending_connection_spheres = []
+        self._highlight_selection()
+
+    def find_connection_covering(self, sphere_indices) -> Optional[SphereConnection]:
+        """An existing connection that already contains this one, or None.
+
+        That is a connection on the same spheres in any order, or, for a cone, a triangle
+        with that cone as an edge: a triangle draws and measures its three edge cones itself
+        (SphereMesh.Prysmoid.edgeCapsuloids).
+        """
+        candidate_sphere_set = {int(i) for i in sphere_indices}
+        covering_triangle = None
+        for connection in self.connections:
+            connection_sphere_set = set(connection.sphere_indices)
+            if connection_sphere_set == candidate_sphere_set:
+                return connection
+            if covering_triangle is None and candidate_sphere_set < connection_sphere_set:
+                covering_triangle = connection
+        return covering_triangle
+
+    def find_connections_made_redundant_by(self, sphere_indices) -> List[SphereConnection]:
+        """Existing cones that a triangle on these spheres would contain: those on its edges."""
+        candidate_sphere_set = {int(i) for i in sphere_indices}
+        if len(candidate_sphere_set) != 3:
+            return []
+        return [
+            connection
+            for connection in self.connections
+            if len(connection.sphere_indices) == 2 and set(connection.sphere_indices) < candidate_sphere_set
+        ]
+
+    def _mirror_twin_for_connection(self, sphere_index: int) -> Optional[int]:
+        """The sphere closest to this one's X-mirror image, itself included, or None.
+
+        Unlike _find_mirror_sphere_index, a sphere on the midline is its own twin, as in
+        check_x_symmetry, so a midline sphere doesn't pick up a nearby midline neighbour and
+        the mirror of a cone that touches the midline keeps its midline sphere.
+        """
+        center = np.asarray(self.spheres[sphere_index].get_center(), dtype=np.float64)
+        mirrored_center = np.array([-center[0], center[1], center[2]], dtype=np.float64)
+        all_centers = np.array([sphere.get_center() for sphere in self.spheres], dtype=np.float64)
+        distances_to_mirror = np.linalg.norm(all_centers - mirrored_center, axis=1)
+        nearest_index = int(np.argmin(distances_to_mirror))
+        if distances_to_mirror[nearest_index] > MIRROR_TWIN_TOLERANCE:
+            return None
+        return nearest_index
+
+    def mirrored_connection_indices(self, sphere_indices) -> Optional[Tuple[int, ...]]:
+        """The twins of these spheres, in the same order, or None when there is no mirror.
+
+        None when a sphere has no twin, when two spheres share one, or when the mirror is the
+        connection itself (a cone across the midline between twins, or a midline triangle).
+        """
+        twin_indices = []
+        for sphere_index in sphere_indices:
+            twin_index = self._mirror_twin_for_connection(int(sphere_index))
+            if twin_index is None:
+                return None
+            twin_indices.append(twin_index)
+        if len(set(twin_indices)) != len(twin_indices):
+            return None
+        if set(twin_indices) == {int(i) for i in sphere_indices}:
+            return None
+        return tuple(twin_indices)
+
+    def prepare_connection_candidate(
+        self, sphere_indices, with_mirror: bool = True, show_preview: bool = True
+    ) -> ConnectionCandidate:
+        """Check a would-be cone or triangle and build it unregistered, ready to commit or discard.
+
+        Nothing changes in the template until commit_connection_candidate. With show_preview,
+        the built connection (and its mirror) is drawn selected-cyan even when "Show
+        Spheremeshes" is off, so the dialog can show what Create would add.
+        """
+        sphere_indices = tuple(int(i) for i in sphere_indices)
+        candidate = ConnectionCandidate(sphere_indices=sphere_indices)
+        if (
+            len(sphere_indices) not in (2, MAX_CONNECTION_SPHERES)
+            or len(set(sphere_indices)) != len(sphere_indices)
+            or not all(0 <= i < len(self.spheres) for i in sphere_indices)
+        ):
+            candidate.invalid_indices = True
+            return candidate
+        candidate.covering_connection = self.find_connection_covering(sphere_indices)
+        if candidate.covering_connection is not None:
+            return candidate
+        candidate.connection = self._build_connection(sphere_indices)
+        if candidate.connection is None:
+            candidate.build_failed = True
+            return candidate
+        candidate.connections_to_remove = self.find_connections_made_redundant_by(sphere_indices)
+
+        if with_mirror:
+            candidate.mirror_sphere_indices = self.mirrored_connection_indices(sphere_indices)
+            if candidate.mirror_sphere_indices is None:
+                candidate.spheres_without_mirror_twin = [
+                    sphere_index for sphere_index in sphere_indices
+                    if self._mirror_twin_for_connection(sphere_index) is None
+                ]
+        if candidate.mirror_sphere_indices is not None:
+            candidate.mirror_covering_connection = self.find_connection_covering(
+                candidate.mirror_sphere_indices
+            )
+            if candidate.mirror_covering_connection is None:
+                candidate.mirror_connection = self._build_connection(candidate.mirror_sphere_indices)
+                candidate.mirror_connections_to_remove = self.find_connections_made_redundant_by(
+                    candidate.mirror_sphere_indices
+                )
+
+        if show_preview:
+            for preview_connection in (candidate.connection, candidate.mirror_connection):
+                if preview_connection is not None:
+                    preview_connection.set_selected(True)
+                    preview_connection.set_visibility(True)
+                    preview_connection.set_connector_visibility(True)
+        return candidate
+
+    def set_candidate_mirror_preview_visible(self, candidate: ConnectionCandidate, visible: bool) -> None:
+        """Show or hide the mirrored connection's preview (the dialog's mirror checkbox)."""
+        if candidate.mirror_connection is None:
+            return
+        candidate.mirror_connection.set_visibility(bool(visible))
+        candidate.mirror_connection.set_connector_visibility(bool(visible))
+
+    def commit_connection_candidate(
+        self, candidate: ConnectionCandidate, include_mirror: bool, select_new: bool = True
+    ) -> Optional[SphereConnection]:
+        """Register a prepared connection, and its mirror if asked, and remove what they make redundant.
+
+        A new triangle removes the cones on its edges, duplicates included; each removal is
+        printed. With select_new the new connection becomes the selection. Returns it, or None
+        for a blocked candidate.
+        """
+        if candidate.connection is None:
+            self.discard_connection_candidate(candidate, clear_selection=False)
+            return None
+        new_connections = [candidate.connection]
+        redundant_connections = list(candidate.connections_to_remove)
+        if include_mirror and candidate.mirror_connection is not None:
+            new_connections.append(candidate.mirror_connection)
+            redundant_connections += [
+                connection
+                for connection in candidate.mirror_connections_to_remove
+                if connection not in redundant_connections
+            ]
+        elif candidate.mirror_connection is not None:
+            candidate.mirror_connection.delete()
+            candidate.mirror_connection = None
+
+        for new_connection in new_connections:
+            self.connections.append(new_connection)
+            new_connection.set_selected(False)
+            new_connection.set_visibility(self.spheremesh_visible)
+            new_connection.set_connector_visibility(self.sphere_widgets_visible)
+            print(f"Added {self.describe_connection(new_connection)}")
+        for redundant_connection in redundant_connections:
+            if redundant_connection not in self.connections:
+                continue
+            covering_connection = next(
+                new_connection
+                for new_connection in new_connections
+                if set(redundant_connection.sphere_indices) < set(new_connection.sphere_indices)
+            )
+            redundant_connection.delete()
+            self.connections.remove(redundant_connection)
+            print(
+                f"Removed redundant {self.describe_connection(redundant_connection)}: "
+                f"an edge of the new {self.describe_connection(covering_connection)}"
+            )
+
+        self._pending_connection_spheres = []
+        if select_new:
+            self.selected_sphere_index = None
+            self.selected_connection = candidate.connection
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+        self.mark_unsaved_changes()
+        return candidate.connection
+
+    def discard_connection_candidate(self, candidate: ConnectionCandidate, clear_selection: bool = True) -> None:
+        """Delete a candidate's preview actors and forget the Ctrl+click set.
+
+        Nothing was registered, so the template is unchanged. With clear_selection nothing is
+        selected afterwards.
+        """
+        for preview_connection in (candidate.connection, candidate.mirror_connection):
+            if preview_connection is not None and preview_connection not in self.connections:
+                preview_connection.delete()
+        candidate.connection = None
+        candidate.mirror_connection = None
+        self._pending_connection_spheres = []
+        if clear_selection:
+            self.selected_sphere_index = None
+            self.selected_connection = None
+        self._highlight_selection()
+        self.update_sphere_information_callback()
+
+    def add_connection_checked(self, sphere_indices) -> Tuple[Optional[SphereConnection], Optional[str]]:
+        """The Add Connection… path: refuse a connection something already covers, else add it.
+
+        Adding it removes the cones it makes redundant, as the Ctrl+click dialog does; the
+        selection is left alone. Returns (new connection, None) or (None, reason refused).
+        try_add_connection stays the unchecked primitive.
+        """
+        candidate = self.prepare_connection_candidate(sphere_indices, with_mirror=False, show_preview=False)
+        refusal_reason = candidate.blocking_reason()
+        if refusal_reason is not None:
+            self.discard_connection_candidate(candidate, clear_selection=False)
+            print(f"Not added {describe_sphere_indices(candidate.sphere_indices)}: {refusal_reason}")
+            return None, refusal_reason
+        return self.commit_connection_candidate(candidate, include_mirror=False, select_new=False), None
 
     def delete_selected_sphere(self) -> bool:
         si = self.selected_sphere_index
@@ -809,10 +1121,15 @@ class SphereManager:
         center = np.array(center, dtype=np.float64)
         print(f"Interacted with sphere {sphere_index}")
 
-        if self.selected_sphere_index != sphere_index or self.selected_connection is not None:
+        if (
+            self.selected_sphere_index != sphere_index
+            or self.selected_connection is not None
+            or self._pending_connection_spheres
+        ):
             self._unhighlight_all()
             self.selected_sphere_index = sphere_index
             self.selected_connection = None
+            self._pending_connection_spheres = []
             self._highlight_selection()
 
         if self.lock_button_callback:
@@ -996,6 +1313,7 @@ class SphereManager:
             c.set_selected(c is selected_connection)
         if si is not None and 0 <= si < len(self.spheres):
             highlighted.add(si)
+        highlighted.update(self.get_pending_connection_sphere_indices())
         for i, s in enumerate(self.spheres):
             s.set_highlighted(i in highlighted)
         if self.lock_button_callback and si is not None:
@@ -1013,6 +1331,7 @@ class SphereManager:
             return False
         self.selected_sphere_index = None
         self.selected_connection = connection
+        self._pending_connection_spheres = []
         self._highlight_selection()
         self.update_sphere_information_callback()
         return True
@@ -1033,9 +1352,7 @@ class SphereManager:
     @staticmethod
     def describe_connection(connection: SphereConnection) -> str:
         """Short label such as 'cone (3, 7)' or 'triangle (1, 3, 4)'."""
-        sphere_indices = connection.sphere_indices
-        kind = "cone" if len(sphere_indices) == 2 else "triangle"
-        return f"{kind} ({', '.join(str(i) for i in sphere_indices)})"
+        return describe_sphere_indices(connection.sphere_indices)
 
     @staticmethod
     def _random_vivid_color():
@@ -1668,6 +1985,7 @@ class SphereManager:
         self._unhighlight_all()
         self.selected_sphere_index = new_i
         self.selected_connection = None
+        self._pending_connection_spheres = []
         self._highlight_selection()
         self.update_sphere_information_callback()
 
@@ -1683,6 +2001,7 @@ class SphereManager:
         self._unhighlight_all()
         self.selected_sphere_index = new_i
         self.selected_connection = None
+        self._pending_connection_spheres = []
         self._highlight_selection()
         self.update_sphere_information_callback()
 

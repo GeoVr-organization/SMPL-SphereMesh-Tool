@@ -34,6 +34,13 @@ Any code that adds, removes or changes spheres or connections must keep all of t
   - Selecting a sphere (`_on_sphere_interaction`, Q/E, `add_sphere`) clears the connection.
 - Use `get_selected_connection()`. It returns None for a connection that has since been
   deleted, and `_highlight_selection()` drops such stale references.
+- The Ctrl+click set (`_pending_connection_spheres`) is extra to the selection.
+  - It stores `ManagedSphere` objects, so a deletion or a load empties it rather than
+    shifting it.
+  - `_highlight_selection()` paints its spheres cyan, and `selected_sphere_index` is the
+    last one added.
+  - Every path that sets a new single selection clears it: plain click, Q/E,
+    `select_connection`, `add_sphere`.
 - `get_selected_sphere_display_data()` returns 1 slot for a sphere, or 2–3 slots (one per
   sphere, in connection order) for a connection.
   - The InfoPanel slot handlers resolve spheres through `data["endpoint_indices"][slot]`:
@@ -114,6 +121,16 @@ Any code that adds, removes or changes spheres or connections must keep all of t
   - a triangle with collinear centres or no tangent plane is its three edge capsuloids.
 - Build connections through `_build_connection(indices)`: it returns None on a geometry
   failure. Validate before mutating, and roll back on failure.
+- Adding a connection from the UI goes through the redundancy checks: the Ctrl+click
+  dialog and Add Connection… (`add_connection_checked`).
+  - `find_connection_covering` refuses a duplicate (same sphere set) or a cone on an
+    existing triangle's edge.
+  - `find_connections_made_redundant_by` lists the cones a new triangle deletes.
+  - `try_add_connection` is the unchecked primitive. Tests rely on it to build duplicates.
+- `prepare_connection_candidate` builds the connection unregistered, as a preview.
+  `commit_connection_candidate` registers it and sets its visibility like the others.
+  `discard_connection_candidate` deletes its actors. Never leave a preview unregistered
+  but alive.
 - The primitives interpolate centres and radii linearly. That makes a midpoint or centroid
   split with the mean radius exactly volume-preserving.
 - `SphereConnection.get_distance` / `get_distances` are exact. `scripts/test_sphere_mesh.py`

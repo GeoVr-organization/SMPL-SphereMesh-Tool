@@ -30,11 +30,12 @@ _GENDER_TO_TEMPLATE_FILENAME: dict[str, str] = {
 }
 
 # The sphere configuration the GUI starts on, where it differs from the shipped one: the
-# SMFitting fit in the star pose the GUI starts in, which the beta offsets in data/offsets
-# are taken against. It lives in data/, apart from SMFitting/output/, which the notebook
-# rewrites. Scripts that fit on the neutral body keep using spheremesh_template_path.
+# SMFitting control fit in the star pose the GUI starts in (SMFitting/mainbeta.py seeded
+# with template_male_1.3_seed_starpose.txt, run on the base mesh), which the beta offsets in
+# data/offsets are taken against. It lives in data/, apart from SMFitting/output/, which the
+# notebooks rewrite. Scripts that fit on the neutral body keep using spheremesh_template_path.
 _GENDER_TO_STARTUP_TEMPLATE_FILENAME: dict[str, str] = {
-    MALE: "template_male_1.1_starpose.txt",
+    MALE: "template_male_1.3_starpose.txt",
 }
 
 # Loading an .npz and building the torch buffers takes about a second, so keep every

@@ -10,14 +10,19 @@ import numpy as np
 import pyvista as pv
 import vtk
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QStackedLayout, QHBoxLayout, QSlider, QLabel, QPushButton, QCheckBox, QComboBox, QMenuBar, QMenu, QGroupBox, QDoubleSpinBox, QSpinBox, QFileDialog, QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QScrollArea, QListWidget, QLineEdit, QPlainTextEdit, QButtonGroup
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QShortcut, QKeySequence
 from pyvistaqt import QtInteractor
 import torch as tc
 
 from src.app_paths import data_file, resource_path, user_data_dir
 from src.sphere_fit import MAX_PROTRUSION_WEIGHT
-from src.sphere_manager import SphereManager
+from src.sphere_manager import (
+    MIRROR_TWIN_TOLERANCE,
+    ConnectionCandidate,
+    SphereManager,
+    describe_sphere_indices,
+)
 from smpl_pytorch.smpl import JOINT_INDEX_TO_LABEL
 from src.export_smpl_fbx import export_smpl_to_fbx
 from src.smpl_forward_compat import my_function_forward
@@ -305,6 +310,123 @@ class AddConnectionDialog(QDialog):
         if n is None:
             n = 2
         return [self._index_combos[k].currentData() for k in range(n)]
+
+
+class CreateConnectionDialog(QDialog):
+    """Ask whether to create the cone or triangle on the Ctrl+clicked spheres, or discard them.
+
+    Enter presses Create (the default button), Esc discards. A blocked candidate (already
+    covered, or no geometry) leaves only Discard. The mirror checkbox appears when the
+    X-mirrored connection can be built; on_mirror_toggled(bool) shows or hides its preview.
+    """
+
+    def __init__(self, parent, candidate: ConnectionCandidate, mirror_checked: bool, on_mirror_toggled=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create connection")
+        self.candidate = candidate
+        sphere_indices = candidate.sphere_indices
+        kind = "cone" if len(sphere_indices) == 2 else "triangle"
+        sphere_list = ", ".join(str(i) for i in sphere_indices[:-1]) + f" and {sphere_indices[-1]}"
+        layout = QVBoxLayout(self)
+        self.question_label = QLabel(f"Create a {kind} between spheres {sphere_list}?")
+        layout.addWidget(self.question_label)
+
+        self.blocking_label = None
+        blocking_reason = candidate.blocking_reason()
+        if blocking_reason is not None:
+            self.blocking_label = QLabel(blocking_reason)
+            self.blocking_label.setStyleSheet("color: #c0392b;")
+            layout.addWidget(self.blocking_label)
+
+        self.removal_label = None
+        if candidate.connections_to_remove:
+            self.removal_label = QLabel(
+                "It replaces the redundant "
+                + ", ".join(
+                    SphereManager.describe_connection(redundant_connection)
+                    for redundant_connection in candidate.connections_to_remove
+                )
+                + " on its edges."
+            )
+            layout.addWidget(self.removal_label)
+
+        self.mirror_checkbox = None
+        self.mirror_note_label = None
+        if candidate.mirror_connection is not None:
+            mirror_text = f"Also create the mirrored {describe_sphere_indices(candidate.mirror_sphere_indices)}"
+            if candidate.mirror_connections_to_remove:
+                mirror_text += " (replacing the redundant " + ", ".join(
+                    SphereManager.describe_connection(redundant_connection)
+                    for redundant_connection in candidate.mirror_connections_to_remove
+                ) + ")"
+            self.mirror_checkbox = QCheckBox(mirror_text)
+            self.mirror_checkbox.setChecked(bool(mirror_checked))
+            if on_mirror_toggled is not None:
+                self.mirror_checkbox.toggled.connect(on_mirror_toggled)
+            layout.addWidget(self.mirror_checkbox)
+        elif candidate.mirror_covering_connection is not None:
+            mirror_description = describe_sphere_indices(candidate.mirror_sphere_indices)
+            covering_indices = candidate.mirror_covering_connection.sphere_indices
+            if len(covering_indices) == len(candidate.mirror_sphere_indices):
+                note = f"The mirrored {mirror_description} already exists."
+            else:
+                note = f"The mirrored {mirror_description} is already an edge of {describe_sphere_indices(covering_indices)}."
+            self.mirror_note_label = QLabel(note)
+            layout.addWidget(self.mirror_note_label)
+        elif candidate.spheres_without_mirror_twin:
+            lone_spheres = candidate.spheres_without_mirror_twin
+            if len(lone_spheres) == 1:
+                subject = f"sphere {lone_spheres[0]} has"
+            else:
+                subject = "spheres " + ", ".join(str(i) for i in lone_spheres[:-1]) + f" and {lone_spheres[-1]} have"
+            self.mirror_note_label = QLabel(
+                f"No mirror: {subject} no X twin within {MIRROR_TWIN_TOLERANCE * 1000:.0f} mm."
+            )
+            layout.addWidget(self.mirror_note_label)
+
+        buttons = QDialogButtonBox()
+        self.create_button = buttons.addButton(
+            f"Create {describe_sphere_indices(sphere_indices)}", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        self.discard_button = buttons.addButton("Discard", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        can_create = candidate.connection is not None
+        self.create_button.setEnabled(can_create)
+        self.create_button.setDefault(can_create)
+        self.discard_button.setDefault(not can_create)
+        layout.addWidget(buttons)
+
+    def include_mirror(self) -> bool:
+        """Whether Create should also add the mirrored connection."""
+        return self.mirror_checkbox is not None and self.mirror_checkbox.isChecked()
+
+
+class _ControlReleaseFilter(QObject):
+    """Application-wide watcher that tells MainWindow when Ctrl goes up or the window deactivates.
+
+    It sits on QApplication because the focused QtInteractor consumes key events without
+    passing them to MainWindow, while after a click MainWindow has focus and VTK sees none.
+    One release reaches the filter once per widget on the propagation chain; MainWindow acts
+    on the first and ignores the rest. Events are never swallowed.
+    """
+
+    def __init__(self, main_window):
+        super().__init__(main_window)
+        self._main_window = main_window
+
+    def eventFilter(self, watched, event):
+        event_type = event.type()
+        if (
+            event_type == QEvent.Type.KeyRelease
+            and event.key() == Qt.Key.Key_Control
+            and not event.isAutoRepeat()
+            and isinstance(watched, QWidget)
+        ):
+            self._main_window._on_control_released()
+        elif event_type == QEvent.Type.WindowDeactivate and watched is self._main_window:
+            self._main_window._abort_ctrl_sphere_selection()
+        return False
 
 
 class RemoveConnectionDialog(QDialog):
@@ -1675,8 +1797,8 @@ class InfoPanel(QGroupBox):
         self._block_center_signals = False
         self._block_radius_signals = False
 
-        # Delete acts on a selected sphere; connections are removed with Remove Connection.
-        self.delete_button.setEnabled(False)
+        # Delete removes the connection itself, never its spheres.
+        self.delete_button.setEnabled(True)
         self.update_lock_buttons(data["locked_per_sphere"], num_slots)
 
     def _on_radius_spinbox_changed(self, sphere_index, value):
@@ -1710,8 +1832,15 @@ class InfoPanel(QGroupBox):
         self.sphere_manager.set_sphere_center_global(g, [x, y, z])
 
     def _on_delete_clicked(self):
-        """Handle delete button click."""
+        """Delete the selected cone/triangle if there is one, otherwise the selected sphere."""
         if hasattr(self, 'sphere_manager') and self.sphere_manager is not None:
+            selected_connection = self.sphere_manager.get_selected_connection()
+            if selected_connection is not None:
+                description = self.sphere_manager.describe_connection(selected_connection)
+                if self.sphere_manager.delete_connection(selected_connection):
+                    print(f"Deleted {description}")
+                    self.update_selected_info()
+                return
             if self.sphere_manager.delete_selected_sphere():
                 self.update_selected_info()
 
@@ -2023,6 +2152,11 @@ class MainWindow(QMainWindow):
         self.ui_layout.addWidget(self.add_sphere_button)
 
         self.add_connection_button = QPushButton("Add Connection…")
+        self.add_connection_button.setToolTip(
+            "Join 2 or 3 spheres by index. In the 3D view you can also Ctrl+click 2 or 3 spheres "
+            "and release Ctrl.\nA connection that already exists, or a cone that is an edge of a "
+            "triangle, is refused; a new triangle replaces the cones on its edges."
+        )
         self.add_connection_button.clicked.connect(self.add_connection_clicked)
         self.ui_layout.addWidget(self.add_connection_button)
         self.remove_connection_button = QPushButton("Remove Connection…")
@@ -2033,7 +2167,7 @@ class MainWindow(QMainWindow):
         self.divide_connection_button.setToolTip(
             "Split the selected cone at its midpoint, or the selected triangle at its centroid, "
             "with a new sphere of the mean radius. Triangles sharing a divided cone's edge are "
-            "split too.\nClick a cone or triangle in the 3D view to select it; Ctrl+click "
+            "split too.\nClick a cone or triangle in the 3D view to select it; Shift+click "
             "reaches the ones hidden behind spheres."
         )
         self.divide_connection_button.clicked.connect(self.divide_connection_clicked)
@@ -2739,9 +2873,29 @@ class MainWindow(QMainWindow):
         if self._confirm_discarding_unsaved_changes(
             "Quit", "Closing the window will discard them."
         ):
+            self._uninstall_control_release_filter()
             event.accept()
         else:
             event.ignore()
+
+    def _uninstall_control_release_filter(self):
+        """Take the application-wide Ctrl watcher off once the window is closing.
+
+        Left installed, it outlives the window into interpreter shutdown, where Qt's teardown
+        events would call back into a half-finalized Python.
+        """
+        control_release_filter = getattr(self, "_control_release_filter", None)
+        if control_release_filter is None:
+            return
+        self._control_release_filter = None
+        application = QApplication.instance()
+        if application is None:
+            return
+        application.removeEventFilter(control_release_filter)
+        try:
+            application.applicationStateChanged.disconnect(self._on_application_state_changed)
+        except TypeError:
+            pass  # never connected
 
     def _load_spheremesh_template_for_gender(self, gender: str):
         """Replace the sphere configuration with the template shipped for *gender*."""
@@ -3477,15 +3631,23 @@ class MainWindow(QMainWindow):
         if not dlg.exec():
             return
         indices = dlg.get_indices()
+        self._add_connection_from_indices(indices)
+
+    def _add_connection_from_indices(self, indices) -> None:
+        """Add Connection… after its dialog: refuse distinctness or redundancy problems, else add."""
         if len(set(indices)) != len(indices):
-            QMessageBox.warning(self, "Connection", "Sphere indices must be distinct.")
+            self._report("Connection", "Sphere indices must be distinct.", QMessageBox.Icon.Warning)
             return
-        if not self.sphere_manager.try_add_connection(tuple(indices)):
-            QMessageBox.warning(
-                self,
+        new_connection, refusal_reason = self.sphere_manager.add_connection_checked(tuple(indices))
+        if new_connection is None:
+            self._report(
                 "Connection",
-                "Could not create connection (invalid geometry or duplicate indices).",
+                f"Did not add {describe_sphere_indices(indices)}. {refusal_reason}",
+                QMessageBox.Icon.Warning,
             )
+            return
+        if self._clip_planes_vtk:
+            self._apply_clip_planes_to_all_actors()
         self.info_panel.update_selected_info()
         self.plotter.render()
 
@@ -3554,18 +3716,38 @@ class MainWindow(QMainWindow):
     # --- Connection picking -------------------------------------------------
     # Sphere widgets claim (abort) every left press that lands on their sphere, at
     # priority 0.5. A press observer below them therefore only sees presses on empty
-    # space or connections. Ctrl+click pauses the widgets for one click so it can reach
-    # cones and triangles hidden behind spheres.
+    # space or connections. Shift+click and Ctrl+click pause the widgets for one click:
+    # Shift+click reaches cones and triangles hidden behind spheres, Ctrl+click collects
+    # spheres for a new connection (and never selects a cone or triangle).
+    # Every widget picks only its own sphere, and widgets of equal priority run in the
+    # order they were added, so a plain press (left: move, right: scale) would go to the
+    # lowest-index sphere anywhere along the ray. The press observer pauses every widget
+    # but the frontmost sphere's for that one press.
 
     def _install_connection_picking(self):
         """Select a cone/triangle with a left click (no drag) in the 3D view."""
         self._connection_click_press_position = None
+        self._connection_click_with_control = False
         self._suspended_sphere_widget_renderers = []
+        # True from any Ctrl+press in the 3D view until Ctrl goes up; the release is seen
+        # several times (once per widget on the propagation chain) and acts once.
+        self._ctrl_sphere_selection_active = False
+        self._create_connection_dialog_waits_for_mouse_release = False
+        self._control_release_filter = _ControlReleaseFilter(self)
+        application = QApplication.instance()
+        application.installEventFilter(self._control_release_filter)
+        # Switching to another program while Ctrl is held: Qt never delivers the release.
+        application.applicationStateChanged.connect(self._on_application_state_changed)
         if self.plotter.iren is None:
             return
         self._connection_picker = vtk.vtkCellPicker()
         self._connection_picker.SetTolerance(CONNECTION_PICK_TOLERANCE)
         self._connection_picker.PickFromListOn()
+        # Tolerance 0 picks exactly the drawn facets; it honours the clip planes, which the
+        # sphere widgets' actors carry like every other actor.
+        self._sphere_picker = vtk.vtkCellPicker()
+        self._sphere_picker.SetTolerance(0.0)
+        self._sphere_picker.PickFromListOn()
         render_window_interactor = self.plotter.iren.interactor
         render_window_interactor.AddObserver(
             "LeftButtonPressEvent", self._on_left_press_before_widgets, 1.0
@@ -3573,18 +3755,33 @@ class MainWindow(QMainWindow):
         render_window_interactor.AddObserver(
             "LeftButtonPressEvent", self._on_left_press_unclaimed, -1.0
         )
+        render_window_interactor.AddObserver(
+            "RightButtonPressEvent", self._on_right_press_before_widgets, 1.0
+        )
+        # No widget took the press: the style has it and will grab the release too.
+        render_window_interactor.AddObserver(
+            "RightButtonPressEvent", self._on_right_press_unclaimed, -1.0
+        )
         # The interactor style grabs focus on press, so the release only reaches an
         # observer registered on the style; pyvista's add_observer does exactly that.
+        # (Never for the right button: a style observer replaces the style's own handler,
+        # and pyvista only re-calls it for the left button.)
         self.plotter.iren.add_observer(
             "LeftButtonReleaseEvent", self._on_left_release_after_unclaimed_press
         )
+        # A press a widget took never reaches the style, so its release comes to the
+        # interactor; the paused widgets are past this press and ignore the release.
+        for release_event in ("LeftButtonReleaseEvent", "RightButtonReleaseEvent"):
+            render_window_interactor.AddObserver(
+                release_event, self._on_release_claimed_by_sphere_widget, 1.0
+            )
 
-    def _suspend_sphere_widgets(self):
-        """Stop the sphere widgets from claiming clicks; they keep rendering."""
+    def _suspend_sphere_widgets(self, listening_sphere_index=None):
+        """Stop the sphere widgets from claiming clicks, except listening_sphere_index's; they keep rendering."""
         self._restore_sphere_widgets()
-        for sphere in self.sphere_manager.spheres if self.sphere_manager else []:
+        for sphere_index, sphere in enumerate(self.sphere_manager.spheres if self.sphere_manager else []):
             sphere_widget = sphere.widget
-            if sphere_widget is None or not sphere_widget.GetEnabled():
+            if sphere_index == listening_sphere_index or sphere_widget is None or not sphere_widget.GetEnabled():
                 continue
             self._suspended_sphere_widget_renderers.append(
                 (sphere_widget, sphere_widget.GetCurrentRenderer())
@@ -3600,13 +3797,50 @@ class MainWindow(QMainWindow):
         # Also recovers from a release that never arrived (e.g. focus lost mid-click).
         self._restore_sphere_widgets()
         self._connection_click_press_position = None
-        if render_window_interactor.GetControlKey():
+        # Ctrl wins over Shift, so Ctrl+Shift+click collects spheres too.
+        self._connection_click_with_control = bool(render_window_interactor.GetControlKey())
+        if self._connection_click_with_control:
+            # Set at the press, so Ctrl going up before this button does still ends the set.
+            self._ctrl_sphere_selection_active = True
+        if self._connection_click_with_control or render_window_interactor.GetShiftKey():
             self._suspend_sphere_widgets()
+        else:
+            self._leave_only_frontmost_sphere_widget(render_window_interactor)
+
+    def _on_right_press_before_widgets(self, render_window_interactor, _event):
+        """A right press (drag scales a sphere): only the frontmost sphere under the cursor may take it."""
+        self._restore_sphere_widgets()
+        self._leave_only_frontmost_sphere_widget(render_window_interactor)
+
+    def _leave_only_frontmost_sphere_widget(self, render_window_interactor):
+        """Pause every sphere widget but the frontmost one under the press; all of them on empty pixels."""
+        if self.sphere_manager is None:
+            return
+        display_x, display_y = render_window_interactor.GetEventPosition()
+        frontmost_sphere_index = self._sphere_index_at_display_position(display_x, display_y)
+        self._suspend_sphere_widgets(listening_sphere_index=frontmost_sphere_index)
+
+    def _on_right_press_unclaimed(self, _render_window_interactor, _event):
+        """No sphere took the right press (camera zoom): let every widget listen again."""
+        self._restore_sphere_widgets()
+
+    def _on_release_claimed_by_sphere_widget(self, _render_window_interactor, _event):
+        """A sphere widget took the press and now the release: let every widget listen again."""
+        self._restore_sphere_widgets()
 
     def _on_left_press_unclaimed(self, render_window_interactor, _event):
         self._connection_click_press_position = render_window_interactor.GetEventPosition()
 
     def _on_left_release_after_unclaimed_press(self, _interactor_style, _event):
+        self._handle_unclaimed_click_release()
+        # Ctrl went up while this button was down: the dialog would have taken the mouse
+        # release and left the interactor style stuck mid-interaction, so it opens now.
+        if self._create_connection_dialog_waits_for_mouse_release:
+            self._create_connection_dialog_waits_for_mouse_release = False
+            QTimer.singleShot(0, self._finish_ctrl_sphere_selection)
+
+    def _handle_unclaimed_click_release(self):
+        """A left click (no drag) that no sphere widget claimed: pick a sphere (Ctrl) or a connection."""
         self._restore_sphere_widgets()
         press_position = self._connection_click_press_position
         self._connection_click_press_position = None
@@ -3617,7 +3851,131 @@ class MainWindow(QMainWindow):
         movement_y = release_y - press_position[1]
         if movement_x * movement_x + movement_y * movement_y > CONNECTION_CLICK_MAX_MOVEMENT_PIXELS ** 2:
             return  # a camera drag, not a click
-        self._select_connection_at_display_position(release_x, release_y)
+        if self._connection_click_with_control:
+            self._toggle_sphere_at_display_position(release_x, release_y)
+        else:
+            self._select_connection_at_display_position(release_x, release_y)
+
+    def _sphere_index_at_display_position(self, display_x, display_y) -> "int | None":
+        """Index of the frontmost visible sphere under a display position, or None.
+
+        vtkSphereWidget does not expose its actor; it is the renderer actor whose property
+        is the widget's sphere property.
+        """
+        sphere_index_by_property_address = {
+            sphere.widget.GetSphereProperty().GetAddressAsString(""): sphere_index
+            for sphere_index, sphere in enumerate(self.sphere_manager.spheres)
+            if sphere.widget is not None and sphere.widget.GetEnabled()
+        }
+        sphere_index_by_actor_address = {}
+        self._sphere_picker.InitializePickList()
+        renderer_actors = self.plotter.renderer.GetActors()
+        renderer_actors.InitTraversal()
+        for _ in range(renderer_actors.GetNumberOfItems()):
+            renderer_actor = renderer_actors.GetNextActor()
+            sphere_index = sphere_index_by_property_address.get(
+                renderer_actor.GetProperty().GetAddressAsString("")
+            )
+            if sphere_index is None or not renderer_actor.GetVisibility():
+                continue
+            sphere_index_by_actor_address[renderer_actor.GetAddressAsString("")] = sphere_index
+            self._sphere_picker.AddPickList(renderer_actor)
+        if not sphere_index_by_actor_address:
+            return None
+        if not self._sphere_picker.Pick(display_x, display_y, 0, self.plotter.renderer):
+            return None
+        return sphere_index_by_actor_address.get(self._sphere_picker.GetActor().GetAddressAsString(""))
+
+    def _toggle_sphere_at_display_position(self, display_x, display_y):
+        """Ctrl+click: add the sphere under the cursor to the new-connection set, or take it out."""
+        sphere_index = self._sphere_index_at_display_position(display_x, display_y)
+        if sphere_index is None:
+            return  # Ctrl+click on empty space or a connection does nothing
+        self.sphere_manager.toggle_pending_connection_sphere(sphere_index)
+        self.info_panel.update_selected_info()
+        self.setFocus()
+        self.plotter.render()
+
+    def _on_control_released(self):
+        """Ctrl went up: ask about the collected spheres (deferred, outside the key event)."""
+        if not self._ctrl_sphere_selection_active:
+            return
+        self._ctrl_sphere_selection_active = False
+        if self._connection_click_press_position is not None:
+            self._create_connection_dialog_waits_for_mouse_release = True
+            return
+        # Opening the modal inside the event filter would hold the key release back from
+        # VTK until the dialog closes.
+        QTimer.singleShot(0, self._finish_ctrl_sphere_selection)
+
+    def _on_application_state_changed(self, application_state):
+        """Another program took focus: a Ctrl or mouse release in progress will not arrive."""
+        if application_state != Qt.ApplicationState.ApplicationActive:
+            self._abort_ctrl_sphere_selection()
+
+    def _abort_ctrl_sphere_selection(self):
+        """The window lost focus during a Ctrl+click set; its release will never arrive. Drop the set.
+
+        That covers Ctrl still held, and Ctrl already up with the dialog waiting for a mouse
+        release. The press in progress is forgotten too: the interactor style keeps the mouse
+        focus until some release arrives, so the next press only reaches the style and its
+        release would otherwise be taken as the end of the old Ctrl+click.
+        """
+        if not (self._ctrl_sphere_selection_active or self._create_connection_dialog_waits_for_mouse_release):
+            return
+        self._ctrl_sphere_selection_active = False
+        self._create_connection_dialog_waits_for_mouse_release = False
+        self._connection_click_press_position = None
+        self._restore_sphere_widgets()
+        if self.sphere_manager is None:
+            return
+        self.sphere_manager.clear_pending_connection_spheres()
+        self.info_panel.update_selected_info()
+        self.plotter.render()
+
+    def _finish_ctrl_sphere_selection(self):
+        """After Ctrl went up: with 2 or 3 spheres collected, preview the connection and ask."""
+        sphere_manager = self.sphere_manager
+        if sphere_manager is None:
+            return
+        pending_indices = sphere_manager.get_pending_connection_sphere_indices()
+        if len(pending_indices) < 2:
+            sphere_manager.clear_pending_connection_spheres()
+            self.info_panel.update_selected_info()
+            self.plotter.render()
+            return
+        candidate = sphere_manager.prepare_connection_candidate(pending_indices, with_mirror=True, show_preview=True)
+
+        def _on_mirror_toggled(mirror_visible):
+            sphere_manager.set_candidate_mirror_preview_visible(candidate, mirror_visible)
+            self.plotter.render()
+
+        dialog = CreateConnectionDialog(
+            self,
+            candidate,
+            mirror_checked=self.checkbox_mirror_edits.isChecked(),
+            on_mirror_toggled=_on_mirror_toggled,
+        )
+        sphere_manager.set_candidate_mirror_preview_visible(candidate, dialog.include_mirror())
+        self.plotter.render()
+        if self._exec_create_connection_dialog(dialog):
+            sphere_manager.commit_connection_candidate(candidate, include_mirror=dialog.include_mirror())
+        else:
+            sphere_manager.discard_connection_candidate(candidate)
+        # A child of the window: without this every dialog, its candidate and closure live on.
+        dialog.deleteLater()
+        if self._clip_planes_vtk:
+            self._apply_clip_planes_to_all_actors()
+        self.info_panel.update_selected_info()
+        self.setFocus()
+        self.plotter.render()
+
+    def _exec_create_connection_dialog(self, dialog: CreateConnectionDialog) -> bool:
+        """Run the create-connection dialog; True means Create. Non-interactive runs take Create when enabled."""
+        if is_non_interactive():
+            print(f"[Create connection] {dialog.question_label.text()} (non-interactive: default button)")
+            return dialog.create_button.isEnabled()
+        return dialog.exec() == QDialog.DialogCode.Accepted
 
     def _select_connection_at_display_position(self, display_x, display_y):
         """Select the connection under a display position; a miss clears a selected one."""

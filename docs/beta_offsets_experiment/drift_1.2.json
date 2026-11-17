@@ -1,0 +1,65 @@
+{
+  "threshold_mm": 10.0,
+  "control_from_seed": {
+    "reference": "template_male_1.1_starpose.txt",
+    "moved": "template_male_1.2_starpose.txt",
+    "centre_median_mm": 5.1,
+    "centre_max_mm": 45.8,
+    "radius_max_mm": 15.6,
+    "spheres_over_threshold": 13,
+    "sphere_count": 60,
+    "largest": [
+      {
+        "sphere": "s27",
+        "centre_mm": 45.8
+      },
+      {
+        "sphere": "s23",
+        "centre_mm": 43.2
+      },
+      {
+        "sphere": "s51",
+        "centre_mm": 31.2
+      },
+      {
+        "sphere": "s50",
+        "centre_mm": 28.1
+      },
+      {
+        "sphere": "s54",
+        "centre_mm": 25.9
+      }
+    ]
+  },
+  "control_seeded_with_control": {
+    "reference": "template_male_1.2_starpose.txt",
+    "moved": "control_of_1.2.txt",
+    "centre_median_mm": 4.8,
+    "centre_max_mm": 79.2,
+    "radius_max_mm": 43.3,
+    "spheres_over_threshold": 15,
+    "sphere_count": 60,
+    "largest": [
+      {
+        "sphere": "s55",
+        "centre_mm": 79.2
+      },
+      {
+        "sphere": "s51",
+        "centre_mm": 42.1
+      },
+      {
+        "sphere": "s27",
+        "centre_mm": 32.4
+      },
+      {
+        "sphere": "s54",
+        "centre_mm": 31.1
+      },
+      {
+        "sphere": "s50",
+        "centre_mm": 26.5
+      }
+    ]
+  }
+}

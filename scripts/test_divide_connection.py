@@ -4,7 +4,7 @@ Covers cone and triangle divides through the button handler, the edge split of e
 triangle on a divided cone (with duplicate cones), exact geometry (the pieces cover exactly
 the old volume, measured with the exact distances of src/topology/bumpers.py), the new
 sphere's joint binding, Inflate, beta offsets, clip planes, save and reload, and selecting
-cones and triangles by clicking in the 3D view (plain click, Ctrl+click, drag, empty click).
+cones and triangles by clicking in the 3D view (plain click, Shift+click, drag, empty click).
 
 Runs with ui_widgets.set_non_interactive(True) so no modal waits for a human.
 
@@ -219,21 +219,22 @@ def display_position(window, world_point) -> tuple[int, int]:
     return int(round(display_x)), int(round(display_y))
 
 
-def click(window, app, position, control_key=False, release_position=None) -> None:
+def click(window, app, position, control_key=False, release_position=None, shift_key=False) -> None:
     """Inject a left press (and, after an optional drag, a release) into the interactor."""
     render_window_interactor = window.plotter.iren.interactor
     control_flag = 1 if control_key else 0
-    render_window_interactor.SetEventInformation(position[0], position[1], control_flag, 0)
+    shift_flag = 1 if shift_key else 0
+    render_window_interactor.SetEventInformation(position[0], position[1], control_flag, shift_flag)
     render_window_interactor.LeftButtonPressEvent()
     if release_position is not None:
         steps = 8
         for step in range(1, steps + 1):
             moved_x = position[0] + (release_position[0] - position[0]) * step // steps
             moved_y = position[1] + (release_position[1] - position[1]) * step // steps
-            render_window_interactor.SetEventInformation(moved_x, moved_y, control_flag, 0)
+            render_window_interactor.SetEventInformation(moved_x, moved_y, control_flag, shift_flag)
             render_window_interactor.MouseMoveEvent()
         position = release_position
-    render_window_interactor.SetEventInformation(position[0], position[1], control_flag, 0)
+    render_window_interactor.SetEventInformation(position[0], position[1], control_flag, shift_flag)
     render_window_interactor.LeftButtonReleaseEvent()
     app.processEvents()
 
@@ -499,7 +500,7 @@ def main() -> int:
         and abs(info_panel.sphere2_center_x.value() - manager.spheres[1].get_center()[0]) < 1e-3,
         "second box holds sphere 1's center and radius",
     )
-    check(not info_panel.delete_button.isEnabled(), "Delete (spheres only) disabled for a cone")
+    check(info_panel.delete_button.isEnabled(), "Delete (the connection) enabled for a cone")
     info_panel.sphere2_radius.setValue(0.045)
     check(abs(manager.spheres[1].get_radius() - 0.045) < 1e-9, "editing the second box edits sphere 1")
     check(manager.get_selected_connection() is clear_cone, "the cone stays selected while editing")
@@ -545,13 +546,13 @@ def main() -> int:
         "plain click on a buried cone hits a sphere",
     )
     renderers_before = [s.widget.GetCurrentRenderer() for s in manager.spheres]
-    click(window, app, buried_midpoint, control_key=True)
-    check(manager.get_selected_connection() is buried_cone, "Ctrl+click reaches the buried cone")
+    click(window, app, buried_midpoint, shift_key=True)
+    check(manager.get_selected_connection() is buried_cone, "Shift+click reaches the buried cone")
     window.move_selected_to_closest_joint_clicked()
     check(manager.get_selected_connection() is buried_cone, "'Selected -> closest joint' ignores a cone")
     check(
         [s.widget.GetCurrentRenderer() for s in manager.spheres] == renderers_before,
-        "sphere widgets restored after Ctrl+click",
+        "sphere widgets restored after Shift+click",
     )
 
     click(window, app, display_position(window, [0.0, -0.40, 0.0]))

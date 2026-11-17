@@ -1,0 +1,1501 @@
+{
+  "generated": "2026-11-05 11:17",
+  "template": "data/template_male_1.2_starpose.txt",
+  "offsets": "data/offsets/beta0..9.csv",
+  "image_directory": "images_1.2",
+  "fitted_region_vertices": 3823,
+  "body_vertices": 6890,
+  "hernia_threshold_mm": -10.0,
+  "shortfall_threshold_mm": 10.0,
+  "results": [
+    {
+      "id": "template",
+      "title": "Template (tutti i beta a 0)",
+      "group": "template",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "offsets": {
+        "min": -10.3,
+        "p1": -7.3,
+        "median": 0.8,
+        "mean_abs": 3.0,
+        "p99": 15.7,
+        "max": 35.2,
+        "hernias": 4,
+        "shortfalls": 150,
+        "grey_whole_body": 2198
+      },
+      "images": {
+        "front": "template_front.png",
+        "back": "template_back.png"
+      },
+      "skeleton_only": {
+        "min": -17.3,
+        "p1": -8.0,
+        "median": 0.8,
+        "mean_abs": 3.05,
+        "p99": 16.2,
+        "max": 35.2,
+        "hernias": 21,
+        "shortfalls": 151,
+        "grey_whole_body": 2199
+      }
+    },
+    {
+      "id": "beta0_p1",
+      "title": "β0 = +1",
+      "group": "plus",
+      "betas": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 0,
+      "offsets": {
+        "min": -10.3,
+        "p1": -6.8,
+        "median": 0.9,
+        "mean_abs": 2.95,
+        "p99": 15.3,
+        "max": 34.5,
+        "hernias": 3,
+        "shortfalls": 145,
+        "grey_whole_body": 2177
+      },
+      "images": {
+        "front": "beta0_p1_front.png",
+        "back": "beta0_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -22.5,
+        "p1": -13.4,
+        "median": -3.2,
+        "mean_abs": 4.62,
+        "p99": 13.2,
+        "max": 33.7,
+        "hernias": 195,
+        "shortfalls": 62,
+        "grey_whole_body": 2131
+      }
+    },
+    {
+      "id": "beta1_p1",
+      "title": "β1 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 1,
+      "offsets": {
+        "min": -10.3,
+        "p1": -7.5,
+        "median": 1.0,
+        "mean_abs": 3.18,
+        "p99": 16.7,
+        "max": 34.5,
+        "hernias": 3,
+        "shortfalls": 164,
+        "grey_whole_body": 2212
+      },
+      "images": {
+        "front": "beta1_p1_front.png",
+        "back": "beta1_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -27.3,
+        "p1": -19.2,
+        "median": -3.6,
+        "mean_abs": 6.03,
+        "p99": 15.6,
+        "max": 35.1,
+        "hernias": 717,
+        "shortfalls": 105,
+        "grey_whole_body": 2189
+      }
+    },
+    {
+      "id": "beta2_p1",
+      "title": "β2 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 2,
+      "offsets": {
+        "min": -10.2,
+        "p1": -7.2,
+        "median": 0.8,
+        "mean_abs": 2.94,
+        "p99": 16.1,
+        "max": 35.9,
+        "hernias": 3,
+        "shortfalls": 149,
+        "grey_whole_body": 2188
+      },
+      "images": {
+        "front": "beta2_p1_front.png",
+        "back": "beta2_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -15.6,
+        "p1": -7.3,
+        "median": 1.7,
+        "mean_abs": 3.44,
+        "p99": 17.0,
+        "max": 35.4,
+        "hernias": 12,
+        "shortfalls": 174,
+        "grey_whole_body": 2194
+      }
+    },
+    {
+      "id": "beta3_p1",
+      "title": "β3 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 3,
+      "offsets": {
+        "min": -10.3,
+        "p1": -7.2,
+        "median": 0.9,
+        "mean_abs": 3.08,
+        "p99": 16.1,
+        "max": 35.2,
+        "hernias": 2,
+        "shortfalls": 163,
+        "grey_whole_body": 2205
+      },
+      "images": {
+        "front": "beta3_p1_front.png",
+        "back": "beta3_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -17.8,
+        "p1": -8.6,
+        "median": 0.5,
+        "mean_abs": 3.16,
+        "p99": 16.2,
+        "max": 35.3,
+        "hernias": 23,
+        "shortfalls": 150,
+        "grey_whole_body": 2195
+      }
+    },
+    {
+      "id": "beta4_p1",
+      "title": "β4 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 4,
+      "offsets": {
+        "min": -10.4,
+        "p1": -7.0,
+        "median": 0.9,
+        "mean_abs": 2.98,
+        "p99": 15.8,
+        "max": 34.8,
+        "hernias": 2,
+        "shortfalls": 155,
+        "grey_whole_body": 2189
+      },
+      "images": {
+        "front": "beta4_p1_front.png",
+        "back": "beta4_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -16.3,
+        "p1": -7.9,
+        "median": 1.4,
+        "mean_abs": 3.25,
+        "p99": 16.6,
+        "max": 35.3,
+        "hernias": 16,
+        "shortfalls": 164,
+        "grey_whole_body": 2182
+      }
+    },
+    {
+      "id": "beta5_p1",
+      "title": "β5 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 5,
+      "offsets": {
+        "min": -10.2,
+        "p1": -7.1,
+        "median": 0.9,
+        "mean_abs": 3.06,
+        "p99": 16.3,
+        "max": 35.5,
+        "hernias": 1,
+        "shortfalls": 165,
+        "grey_whole_body": 2209
+      },
+      "images": {
+        "front": "beta5_p1_front.png",
+        "back": "beta5_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -18.7,
+        "p1": -6.8,
+        "median": 2.0,
+        "mean_abs": 3.64,
+        "p99": 17.8,
+        "max": 35.2,
+        "hernias": 20,
+        "shortfalls": 213,
+        "grey_whole_body": 2208
+      }
+    },
+    {
+      "id": "beta6_p1",
+      "title": "β6 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 6,
+      "offsets": {
+        "min": -10.3,
+        "p1": -6.7,
+        "median": 0.8,
+        "mean_abs": 2.89,
+        "p99": 15.5,
+        "max": 34.8,
+        "hernias": 1,
+        "shortfalls": 147,
+        "grey_whole_body": 2203
+      },
+      "images": {
+        "front": "beta6_p1_front.png",
+        "back": "beta6_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -17.2,
+        "p1": -9.4,
+        "median": 0.8,
+        "mean_abs": 3.39,
+        "p99": 16.6,
+        "max": 35.5,
+        "hernias": 30,
+        "shortfalls": 150,
+        "grey_whole_body": 2203
+      }
+    },
+    {
+      "id": "beta7_p1",
+      "title": "β7 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 7,
+      "offsets": {
+        "min": -10.4,
+        "p1": -7.3,
+        "median": 0.8,
+        "mean_abs": 2.97,
+        "p99": 16.4,
+        "max": 35.0,
+        "hernias": 4,
+        "shortfalls": 149,
+        "grey_whole_body": 2189
+      },
+      "images": {
+        "front": "beta7_p1_front.png",
+        "back": "beta7_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -17.8,
+        "p1": -8.0,
+        "median": 1.3,
+        "mean_abs": 3.21,
+        "p99": 16.3,
+        "max": 35.6,
+        "hernias": 23,
+        "shortfalls": 159,
+        "grey_whole_body": 2197
+      }
+    },
+    {
+      "id": "beta8_p1",
+      "title": "β8 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "beta_index": 8,
+      "offsets": {
+        "min": -10.4,
+        "p1": -7.3,
+        "median": 0.8,
+        "mean_abs": 2.96,
+        "p99": 16.2,
+        "max": 35.8,
+        "hernias": 3,
+        "shortfalls": 146,
+        "grey_whole_body": 2200
+      },
+      "images": {
+        "front": "beta8_p1_front.png",
+        "back": "beta8_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -18.1,
+        "p1": -8.4,
+        "median": 0.5,
+        "mean_abs": 3.05,
+        "p99": 16.3,
+        "max": 35.3,
+        "hernias": 23,
+        "shortfalls": 156,
+        "grey_whole_body": 2200
+      }
+    },
+    {
+      "id": "beta9_p1",
+      "title": "β9 = +1",
+      "group": "plus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "beta_index": 9,
+      "offsets": {
+        "min": -10.2,
+        "p1": -7.2,
+        "median": 0.9,
+        "mean_abs": 3.04,
+        "p99": 16.4,
+        "max": 34.5,
+        "hernias": 3,
+        "shortfalls": 156,
+        "grey_whole_body": 2197
+      },
+      "images": {
+        "front": "beta9_p1_front.png",
+        "back": "beta9_p1_back.png"
+      },
+      "vs_fit_mm": {
+        "centre_max": 0.78,
+        "radius_max": 0.0
+      },
+      "skeleton_only": {
+        "min": -18.6,
+        "p1": -9.8,
+        "median": 0.7,
+        "mean_abs": 3.09,
+        "p99": 15.4,
+        "max": 34.6,
+        "hernias": 32,
+        "shortfalls": 132,
+        "grey_whole_body": 2190
+      }
+    },
+    {
+      "id": "beta0_m1",
+      "title": "β0 = -1",
+      "group": "minus",
+      "betas": [
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 0,
+      "offsets": {
+        "min": -15.1,
+        "p1": -8.2,
+        "median": 0.8,
+        "mean_abs": 3.13,
+        "p99": 18.2,
+        "max": 36.0,
+        "hernias": 17,
+        "shortfalls": 173,
+        "grey_whole_body": 2237
+      },
+      "images": {
+        "front": "beta0_m1_front.png",
+        "back": "beta0_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -13.1,
+        "p1": -5.0,
+        "median": 5.4,
+        "mean_abs": 6.28,
+        "p99": 21.4,
+        "max": 36.7,
+        "hernias": 9,
+        "shortfalls": 673,
+        "grey_whole_body": 2275
+      }
+    },
+    {
+      "id": "beta1_m1",
+      "title": "β1 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 1,
+      "offsets": {
+        "min": -12.1,
+        "p1": -7.5,
+        "median": 0.7,
+        "mean_abs": 2.97,
+        "p99": 16.0,
+        "max": 35.9,
+        "hernias": 10,
+        "shortfalls": 141,
+        "grey_whole_body": 2185
+      },
+      "images": {
+        "front": "beta1_m1_front.png",
+        "back": "beta1_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -15.7,
+        "p1": -7.0,
+        "median": 5.8,
+        "mean_abs": 7.42,
+        "p99": 23.1,
+        "max": 35.3,
+        "hernias": 15,
+        "shortfalls": 1126,
+        "grey_whole_body": 2290
+      }
+    },
+    {
+      "id": "beta2_m1",
+      "title": "β2 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 2,
+      "offsets": {
+        "min": -12.6,
+        "p1": -7.5,
+        "median": 0.9,
+        "mean_abs": 3.09,
+        "p99": 16.6,
+        "max": 34.5,
+        "hernias": 9,
+        "shortfalls": 159,
+        "grey_whole_body": 2205
+      },
+      "images": {
+        "front": "beta2_m1_front.png",
+        "back": "beta2_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -19.6,
+        "p1": -9.6,
+        "median": 0.1,
+        "mean_abs": 3.19,
+        "p99": 16.5,
+        "max": 35.0,
+        "hernias": 34,
+        "shortfalls": 146,
+        "grey_whole_body": 2205
+      }
+    },
+    {
+      "id": "beta3_m1",
+      "title": "β3 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 3,
+      "offsets": {
+        "min": -15.0,
+        "p1": -7.7,
+        "median": 0.8,
+        "mean_abs": 2.97,
+        "p99": 16.6,
+        "max": 35.2,
+        "hernias": 14,
+        "shortfalls": 148,
+        "grey_whole_body": 2193
+      },
+      "images": {
+        "front": "beta3_m1_front.png",
+        "back": "beta3_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -18.1,
+        "p1": -8.1,
+        "median": 1.3,
+        "mean_abs": 3.32,
+        "p99": 16.8,
+        "max": 35.2,
+        "hernias": 23,
+        "shortfalls": 169,
+        "grey_whole_body": 2199
+      }
+    },
+    {
+      "id": "beta4_m1",
+      "title": "β4 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 4,
+      "offsets": {
+        "min": -14.8,
+        "p1": -7.9,
+        "median": 0.8,
+        "mean_abs": 3.07,
+        "p99": 16.6,
+        "max": 35.6,
+        "hernias": 14,
+        "shortfalls": 153,
+        "grey_whole_body": 2209
+      },
+      "images": {
+        "front": "beta4_m1_front.png",
+        "back": "beta4_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -19.6,
+        "p1": -9.0,
+        "median": 0.4,
+        "mean_abs": 3.12,
+        "p99": 16.1,
+        "max": 35.2,
+        "hernias": 24,
+        "shortfalls": 148,
+        "grey_whole_body": 2215
+      }
+    },
+    {
+      "id": "beta5_m1",
+      "title": "β5 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 5,
+      "offsets": {
+        "min": -15.8,
+        "p1": -7.9,
+        "median": 0.8,
+        "mean_abs": 3.01,
+        "p99": 16.2,
+        "max": 34.9,
+        "hernias": 16,
+        "shortfalls": 146,
+        "grey_whole_body": 2187
+      },
+      "images": {
+        "front": "beta5_m1_front.png",
+        "back": "beta5_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -17.4,
+        "p1": -10.0,
+        "median": -0.3,
+        "mean_abs": 3.12,
+        "p99": 15.7,
+        "max": 35.2,
+        "hernias": 38,
+        "shortfalls": 122,
+        "grey_whole_body": 2186
+      }
+    },
+    {
+      "id": "beta6_m1",
+      "title": "β6 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 6,
+      "offsets": {
+        "min": -12.9,
+        "p1": -7.7,
+        "median": 0.9,
+        "mean_abs": 3.16,
+        "p99": 16.9,
+        "max": 35.6,
+        "hernias": 14,
+        "shortfalls": 164,
+        "grey_whole_body": 2191
+      },
+      "images": {
+        "front": "beta6_m1_front.png",
+        "back": "beta6_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -18.2,
+        "p1": -8.8,
+        "median": 1.1,
+        "mean_abs": 3.53,
+        "p99": 17.2,
+        "max": 34.9,
+        "hernias": 26,
+        "shortfalls": 186,
+        "grey_whole_body": 2196
+      }
+    },
+    {
+      "id": "beta7_m1",
+      "title": "β7 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0
+      ],
+      "beta_index": 7,
+      "offsets": {
+        "min": -10.6,
+        "p1": -7.3,
+        "median": 0.9,
+        "mean_abs": 3.04,
+        "p99": 16.0,
+        "max": 35.4,
+        "hernias": 4,
+        "shortfalls": 157,
+        "grey_whole_body": 2204
+      },
+      "images": {
+        "front": "beta7_m1_front.png",
+        "back": "beta7_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -17.3,
+        "p1": -8.6,
+        "median": 0.5,
+        "mean_abs": 3.08,
+        "p99": 15.8,
+        "max": 34.9,
+        "hernias": 21,
+        "shortfalls": 156,
+        "grey_whole_body": 2201
+      }
+    },
+    {
+      "id": "beta8_m1",
+      "title": "β8 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "beta_index": 8,
+      "offsets": {
+        "min": -10.4,
+        "p1": -7.2,
+        "median": 0.9,
+        "mean_abs": 3.04,
+        "p99": 16.0,
+        "max": 34.6,
+        "hernias": 4,
+        "shortfalls": 156,
+        "grey_whole_body": 2199
+      },
+      "images": {
+        "front": "beta8_m1_front.png",
+        "back": "beta8_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -17.0,
+        "p1": -8.0,
+        "median": 1.2,
+        "mean_abs": 3.22,
+        "p99": 16.1,
+        "max": 35.1,
+        "hernias": 20,
+        "shortfalls": 157,
+        "grey_whole_body": 2200
+      }
+    },
+    {
+      "id": "beta9_m1",
+      "title": "β9 = -1",
+      "group": "minus",
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "beta_index": 9,
+      "offsets": {
+        "min": -10.6,
+        "p1": -7.3,
+        "median": 0.8,
+        "mean_abs": 2.97,
+        "p99": 16.0,
+        "max": 35.9,
+        "hernias": 6,
+        "shortfalls": 146,
+        "grey_whole_body": 2204
+      },
+      "images": {
+        "front": "beta9_m1_front.png",
+        "back": "beta9_m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -16.3,
+        "p1": -7.6,
+        "median": 1.1,
+        "mean_abs": 3.24,
+        "p99": 17.2,
+        "max": 35.9,
+        "hernias": 15,
+        "shortfalls": 188,
+        "grey_whole_body": 2208
+      }
+    },
+    {
+      "id": "combo_b0p1_b1p1",
+      "title": "β0 = +1, β1 = +1",
+      "group": "combo",
+      "betas": [
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "offsets": {
+        "min": -10.2,
+        "p1": -7.2,
+        "median": 1.0,
+        "mean_abs": 3.16,
+        "p99": 16.3,
+        "max": 33.8,
+        "hernias": 1,
+        "shortfalls": 151,
+        "grey_whole_body": 2184
+      },
+      "images": {
+        "front": "combo_b0p1_b1p1_front.png",
+        "back": "combo_b0p1_b1p1_back.png"
+      },
+      "skeleton_only": {
+        "min": -39.4,
+        "p1": -28.9,
+        "median": -7.4,
+        "mean_abs": 9.57,
+        "p99": 12.6,
+        "max": 33.6,
+        "hernias": 1340,
+        "shortfalls": 55,
+        "grey_whole_body": 2122
+      }
+    },
+    {
+      "id": "combo_b1p1_b2m1",
+      "title": "β1 = +1, β2 = −1",
+      "group": "combo",
+      "betas": [
+        0.0,
+        1.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "offsets": {
+        "min": -12.6,
+        "p1": -7.9,
+        "median": 1.0,
+        "mean_abs": 3.29,
+        "p99": 17.3,
+        "max": 33.8,
+        "hernias": 11,
+        "shortfalls": 170,
+        "grey_whole_body": 2213
+      },
+      "images": {
+        "front": "combo_b1p1_b2m1_front.png",
+        "back": "combo_b1p1_b2m1_back.png"
+      },
+      "skeleton_only": {
+        "min": -32.8,
+        "p1": -23.5,
+        "median": -4.2,
+        "mean_abs": 6.77,
+        "p99": 16.4,
+        "max": 34.9,
+        "hernias": 829,
+        "shortfalls": 106,
+        "grey_whole_body": 2197
+      }
+    },
+    {
+      "id": "random01",
+      "title": "Random shape 1",
+      "group": "random",
+      "betas": [
+        -0.19465739634997917,
+        -2.4617475289941053,
+        -1.6055494107661634,
+        0.7742602991748879,
+        1.2606272474175924,
+        -0.5204127492996388,
+        -1.5052119233412828,
+        -0.131522846127401,
+        -1.4239763777385175,
+        0.008917050148331196
+      ],
+      "csv_row": 1,
+      "offsets": {
+        "min": -20.0,
+        "p1": -10.6,
+        "median": 0.7,
+        "mean_abs": 3.56,
+        "p99": 17.5,
+        "max": 37.9,
+        "hernias": 54,
+        "shortfalls": 174,
+        "grey_whole_body": 2166
+      },
+      "images": {
+        "front": "random01_front.png",
+        "back": "random01_back.png"
+      },
+      "skeleton_only": {
+        "min": -15.6,
+        "p1": -6.5,
+        "median": 13.6,
+        "mean_abs": 15.05,
+        "p99": 36.9,
+        "max": 40.7,
+        "hernias": 15,
+        "shortfalls": 2412,
+        "grey_whole_body": 3360
+      }
+    },
+    {
+      "id": "random02",
+      "title": "Random shape 2",
+      "group": "random",
+      "betas": [
+        -1.2175192951063372,
+        0.30663327585495265,
+        -0.42976108583949224,
+        -2.0881320466948017,
+        -0.9089265882310927,
+        0.486030585659952,
+        0.04716076260023513,
+        1.1510443659365253,
+        -1.9563233079468376,
+        -1.793526168157562
+      ],
+      "csv_row": 2,
+      "offsets": {
+        "min": -30.9,
+        "p1": -18.1,
+        "median": 0.7,
+        "mean_abs": 3.48,
+        "p99": 18.1,
+        "max": 36.0,
+        "hernias": 77,
+        "shortfalls": 167,
+        "grey_whole_body": 2229
+      },
+      "images": {
+        "front": "random02_front.png",
+        "back": "random02_back.png"
+      },
+      "skeleton_only": {
+        "min": -12.7,
+        "p1": -5.1,
+        "median": 6.6,
+        "mean_abs": 7.64,
+        "p99": 27.1,
+        "max": 38.2,
+        "hernias": 7,
+        "shortfalls": 1054,
+        "grey_whole_body": 2347
+      }
+    },
+    {
+      "id": "random03",
+      "title": "Random shape 3",
+      "group": "random",
+      "betas": [
+        -0.42101980294626495,
+        1.0144013821083724,
+        1.3686507822692415,
+        -2.3109370946717047,
+        1.0021254456571242,
+        1.4889274023501538,
+        0.12496602737834386,
+        1.9001863965077408,
+        -0.7500014513621313,
+        0.18408382237146087
+      ],
+      "csv_row": 3,
+      "offsets": {
+        "min": -34.1,
+        "p1": -7.5,
+        "median": 0.8,
+        "mean_abs": 3.08,
+        "p99": 17.0,
+        "max": 34.8,
+        "hernias": 19,
+        "shortfalls": 163,
+        "grey_whole_body": 2190
+      },
+      "images": {
+        "front": "random03_front.png",
+        "back": "random03_back.png"
+      },
+      "skeleton_only": {
+        "min": -15.4,
+        "p1": -8.5,
+        "median": 1.8,
+        "mean_abs": 4.34,
+        "p99": 20.3,
+        "max": 36.5,
+        "hernias": 16,
+        "shortfalls": 334,
+        "grey_whole_body": 2208
+      }
+    },
+    {
+      "id": "random04",
+      "title": "Random shape 4",
+      "group": "random",
+      "betas": [
+        1.0706838819615072,
+        -0.6038701629711396,
+        0.015470197908242108,
+        1.2150435597800358,
+        -1.474651204293423,
+        0.03447674522970142,
+        -0.7317668416903168,
+        -0.5376406077401059,
+        -2.160507833750155,
+        -1.3556465393142199
+      ],
+      "csv_row": 4,
+      "offsets": {
+        "min": -15.4,
+        "p1": -8.8,
+        "median": 0.7,
+        "mean_abs": 3.29,
+        "p99": 16.0,
+        "max": 35.5,
+        "hernias": 24,
+        "shortfalls": 156,
+        "grey_whole_body": 2188
+      },
+      "images": {
+        "front": "random04_front.png",
+        "back": "random04_back.png"
+      },
+      "skeleton_only": {
+        "min": -22.3,
+        "p1": -14.2,
+        "median": -0.1,
+        "mean_abs": 4.48,
+        "p99": 16.8,
+        "max": 34.4,
+        "hernias": 190,
+        "shortfalls": 164,
+        "grey_whole_body": 2156
+      }
+    },
+    {
+      "id": "random05",
+      "title": "Random shape 5",
+      "group": "random",
+      "betas": [
+        0.0867739430094032,
+        0.03537605584904324,
+        -0.2885500409774378,
+        0.47332684670976627,
+        -0.2954290175680892,
+        0.9494785207917161,
+        1.6335136690874288,
+        -0.7391913372789604,
+        -0.11927710094961459,
+        -0.7155089556265557
+      ],
+      "csv_row": 5,
+      "offsets": {
+        "min": -10.1,
+        "p1": -6.8,
+        "median": 0.8,
+        "mean_abs": 2.97,
+        "p99": 16.2,
+        "max": 35.2,
+        "hernias": 1,
+        "shortfalls": 157,
+        "grey_whole_body": 2251
+      },
+      "images": {
+        "front": "random05_front.png",
+        "back": "random05_back.png"
+      },
+      "skeleton_only": {
+        "min": -17.6,
+        "p1": -9.3,
+        "median": 0.6,
+        "mean_abs": 3.5,
+        "p99": 17.7,
+        "max": 35.7,
+        "hernias": 26,
+        "shortfalls": 176,
+        "grey_whole_body": 2231
+      }
+    },
+    {
+      "id": "random06",
+      "title": "Random shape 6",
+      "group": "random",
+      "betas": [
+        0.14433113586017524,
+        -0.7427722458797384,
+        -0.8028898098541295,
+        0.9686141774221975,
+        0.6809787699244134,
+        1.0114974549094564,
+        0.9168544538497095,
+        0.5413540277726482,
+        -0.16600678232527247,
+        0.29857761414574036
+      ],
+      "csv_row": 6,
+      "offsets": {
+        "min": -10.5,
+        "p1": -7.2,
+        "median": 0.8,
+        "mean_abs": 3.08,
+        "p99": 17.4,
+        "max": 34.3,
+        "hernias": 4,
+        "shortfalls": 173,
+        "grey_whole_body": 2214
+      },
+      "images": {
+        "front": "random06_front.png",
+        "back": "random06_back.png"
+      },
+      "skeleton_only": {
+        "min": -18.8,
+        "p1": -8.1,
+        "median": 4.4,
+        "mean_abs": 6.06,
+        "p99": 19.1,
+        "max": 35.2,
+        "hernias": 24,
+        "shortfalls": 753,
+        "grey_whole_body": 2206
+      }
+    },
+    {
+      "id": "random07",
+      "title": "Random shape 7",
+      "group": "random",
+      "betas": [
+        1.052102700631568,
+        0.6724933387611333,
+        -0.43372705993003713,
+        -0.5063291237512315,
+        0.2063706740348093,
+        0.46903475868071376,
+        -0.08479990436712748,
+        -0.8821090586268665,
+        0.4809555005867819,
+        1.8439329681808108
+      ],
+      "csv_row": 7,
+      "offsets": {
+        "min": -10.3,
+        "p1": -7.1,
+        "median": 1.0,
+        "mean_abs": 3.22,
+        "p99": 16.7,
+        "max": 32.9,
+        "hernias": 2,
+        "shortfalls": 173,
+        "grey_whole_body": 2179
+      },
+      "images": {
+        "front": "random07_front.png",
+        "back": "random07_back.png"
+      },
+      "skeleton_only": {
+        "min": -34.6,
+        "p1": -25.6,
+        "median": -6.7,
+        "mean_abs": 8.4,
+        "p99": 11.6,
+        "max": 31.9,
+        "hernias": 1154,
+        "shortfalls": 47,
+        "grey_whole_body": 2122
+      }
+    },
+    {
+      "id": "random08",
+      "title": "Random shape 8",
+      "group": "random",
+      "betas": [
+        -1.2793833847381728,
+        0.038623315985510526,
+        2.328810161609364,
+        1.2690372629393043,
+        0.760207370597225,
+        1.0760330869891654,
+        -0.13857368762989866,
+        -0.6682740472024243,
+        1.2725338509809578,
+        0.5003640823442344
+      ],
+      "csv_row": 8,
+      "offsets": {
+        "min": -16.7,
+        "p1": -7.9,
+        "median": 0.8,
+        "mean_abs": 3.3,
+        "p99": 18.5,
+        "max": 38.4,
+        "hernias": 10,
+        "shortfalls": 200,
+        "grey_whole_body": 2362
+      },
+      "images": {
+        "front": "random08_front.png",
+        "back": "random08_back.png"
+      },
+      "skeleton_only": {
+        "min": -9.2,
+        "p1": -2.5,
+        "median": 8.0,
+        "mean_abs": 9.36,
+        "p99": 27.5,
+        "max": 38.0,
+        "hernias": 0,
+        "shortfalls": 1486,
+        "grey_whole_body": 2567
+      }
+    },
+    {
+      "id": "random09",
+      "title": "Random shape 9",
+      "group": "random",
+      "betas": [
+        -1.0711592359156994,
+        -0.24574644678026572,
+        0.9195504902394694,
+        0.786893653996992,
+        0.30517515313005644,
+        1.2861248541657038,
+        -0.008851993287229524,
+        0.3076505544845542,
+        -0.10510844277777158,
+        -0.02891075034671198
+      ],
+      "csv_row": 9,
+      "offsets": {
+        "min": -12.2,
+        "p1": -7.6,
+        "median": 0.8,
+        "mean_abs": 3.22,
+        "p99": 17.6,
+        "max": 37.0,
+        "hernias": 8,
+        "shortfalls": 206,
+        "grey_whole_body": 2286
+      },
+      "images": {
+        "front": "random09_front.png",
+        "back": "random09_back.png"
+      },
+      "skeleton_only": {
+        "min": -11.6,
+        "p1": -2.8,
+        "median": 9.1,
+        "mean_abs": 9.94,
+        "p99": 26.2,
+        "max": 37.5,
+        "hernias": 5,
+        "shortfalls": 1706,
+        "grey_whole_body": 2498
+      }
+    },
+    {
+      "id": "random10",
+      "title": "Random shape 10",
+      "group": "random",
+      "betas": [
+        -1.1968841338451721,
+        -0.642649392227456,
+        1.1087014907989003,
+        1.6930767913042866,
+        -0.025351866911642647,
+        0.07937291722856443,
+        0.18500565420434364,
+        -0.4587099973793467,
+        -0.5089627541131299,
+        0.3179377252894673
+      ],
+      "csv_row": 10,
+      "offsets": {
+        "min": -12.1,
+        "p1": -7.9,
+        "median": 0.8,
+        "mean_abs": 3.22,
+        "p99": 17.9,
+        "max": 36.9,
+        "hernias": 8,
+        "shortfalls": 185,
+        "grey_whole_body": 2304
+      },
+      "images": {
+        "front": "random10_front.png",
+        "back": "random10_back.png"
+      },
+      "skeleton_only": {
+        "min": -9.7,
+        "p1": -3.6,
+        "median": 9.6,
+        "mean_abs": 10.59,
+        "p99": 27.3,
+        "max": 37.1,
+        "hernias": 0,
+        "shortfalls": 1837,
+        "grey_whole_body": 2616
+      }
+    }
+  ]
+}

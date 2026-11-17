@@ -109,8 +109,10 @@ def _(Path):
     #sphereMeshPath = "examples/smol_star.txt"
     #sphereMeshPath = "examples/SMPL_male_star.txt"
     #sphereMeshPath = "examples/new_wp.txt"
-    # The GUI's startup template and the base of the beta offsets, kept in data/ so that
-    # main.py's save to output/template_male_1.1.txt cannot change it.
+    # The seed of every run: keep it for the control and for all betaN fits alike. The control
+    # (betaObjPath = examples/SMPL_starpose.obj) is data/template_male_1.2_starpose.txt, the
+    # GUI's template and the base of the offsets; this procedure does not return its seed
+    # (46 mm from 1.1, 79 mm when seeded with 1.2), so fits from another seed carry another drift.
     sphereMeshPath = "../data/template_male_1.1_starpose.txt"
     # The surface it was fitted to, shown from section 5 on.
     #objPath = "examples/SMPL_male.obj"
@@ -725,7 +727,9 @@ def _(dfBetaVertices, dfVertices, lil_matrix, mesh_vertices, np, spheremesh):
 @app.cell
 def _(A, M, b, diags, np, spheremesh, vstack):
     #Regularization
-    P, P_r = 0.25, 0.25 
+    # 1, not 0.25: at 0.25 overlapping spheres trade places along directions the tangency
+    # rows barely see (s55 slid 118 mm into s50; the beta1 offset then swapped s50 for s55).
+    P, P_r = 1, 1
 
     x0 = np.zeros(4 * M)
     for j, s in enumerate(spheremesh.spheres):

@@ -3,7 +3,7 @@
 Covers:
 - the startup pose: hips turned about Z (left +, right -), shared with Theta Controls, the
   body equal to SMFitting/examples/SMPL_starpose.obj, the pose picker marked edited;
-- the male startup template, data/template_male_1.1_starpose.txt, loaded as shown in it;
+- the male startup template, data/template_male_1.3_starpose.txt, loaded as shown in it;
 - binding under a pose: FK puts every sphere back where it was loaded, in LBS and rigid
   mode, and after Reassign all parents (a posed centre bound as a rest one would be posed
   twice, spreading the legs again);
@@ -126,8 +126,8 @@ def main() -> int:
     print("\nStartup template")
     male_payload = template_payload(MALE)
     startup_template_path = startup_spheremesh_template_path(MALE)
-    check(startup_template_path == REPOSITORY_ROOT / "data" / "template_male_1.1_starpose.txt",
-          "male startup template is data/template_male_1.1_starpose.txt", str(startup_template_path))
+    check(startup_template_path == REPOSITORY_ROOT / "data" / "template_male_1.3_starpose.txt",
+          "male startup template is data/template_male_1.3_starpose.txt", str(startup_template_path))
     file_centres = np.array([sphere["center"] for sphere in male_payload["spheres"]], dtype=np.float64)
     file_radii = np.array([sphere["radius"] for sphere in male_payload["spheres"]], dtype=np.float64)
     check(manager.get_sphere_count() == len(file_centres) and len(manager.connections) == len(male_payload["connections"]),

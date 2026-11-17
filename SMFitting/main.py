@@ -683,7 +683,9 @@ def _(dfVertices, lil_matrix, mesh_vertices, np, spheremesh):
 @app.cell
 def _(A, M, b, diags, np, spheremesh, vstack):
     #Regularization
-    P, P_r = 0.25, 0.25 
+    # 1, not 0.25: at 0.25 overlapping spheres trade places along directions the tangency
+    # rows barely see (s55 slid 118 mm into s50; the beta1 offset then swapped s50 for s55).
+    P, P_r = 1, 1
 
     x0 = np.zeros(4 * M)
     for j, s in enumerate(spheremesh.spheres):

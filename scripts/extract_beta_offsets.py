@@ -10,10 +10,17 @@ the format is picked from the file extension. Only each sphere's centre and radi
 are read.
 
 Default layout:
-    data/template_male_1.1_starpose.txt   the template (star pose, all betas 0), which
+    data/template_male_1.3_starpose.txt   the template (star pose, all betas 0), which
                                           the GUI also starts on
     SMFitting/output/beta0.txt, beta1.txt ...
                                           the sphere mesh fitted for SMPL beta N
+
+The template must come from the same fitting run as the betaN.txt files:
+SMFitting/mainbeta.py seeded with data/template_male_1.3_seed_starpose.txt, with the base
+mesh (examples/SMPL_starpose.obj) as the "beta" mesh. The procedure moves some spheres by
+tens of millimetres even when nothing changes (up to 31 mm from the 1.3 seed); taken against
+that control fit, the move cancels out of every offset instead of being added sum(beta)
+times by the GUI.
 
 Usage
 -----
@@ -49,7 +56,7 @@ _OFFSETS_DIR  = _REPO_ROOT / "data" / "offsets"
 _FIT_OUTPUT_DIR = _REPO_ROOT / "SMFitting" / "output"
 
 DEFAULT_INPUT_DIR  = _FIT_OUTPUT_DIR
-DEFAULT_TEMPLATE   = _REPO_ROOT / "data" / "template_male_1.1_starpose.txt"
+DEFAULT_TEMPLATE   = _REPO_ROOT / "data" / "template_male_1.3_starpose.txt"
 DEFAULT_OUTPUT_DIR = _OFFSETS_DIR
 
 # betaN.txt -> N, for --all
